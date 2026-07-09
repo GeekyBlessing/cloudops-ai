@@ -1,0 +1,63 @@
+name: Terraform Plan
+
+on:
+  pull_request:
+    paths:
+      - "infra/**"
+      - ".github/workflows/terraform-plan.yml"
+
+permissions:
+  contents: read
+  # id-token: write is what lets this workflow exchange a short-lived
+  # GitHub-issued OIDC token for temporary AWS credentials in the
+  # "Configure AWS credentials" step below, with no long-lived AWS access
+  # keys stored as a GitHub secret at all.
+  id-token: write
+  pull-requests: write
+
+defaults:
+  run:
+    working-directory: infra/environments/dev
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.9"
+
+      - name: Format check
+        run: terraform fmt -check -recursive ..
+
+      # No AWS access needed for fmt/init/validate -- backend=false skips
+      # the remote-state bootstrap infra/README.md describes, since CI
+      # only needs to prove the config is well-formed, not touch real
+      # state.
+      - name: Init
+        run: terraform init -backend=false
+
+      - name: Validate
+        run: terraform validate
+
+      # Everything above needs no AWS access. A real `plan` does --
+      # Terraform has to read actual account state (e.g. the default
+      # VPC's subnets, via modules/ecs's data sources) even to compute
+      # what it *would* change. This step assumes an IAM OIDC identity
+      # provider plus a "cloudops-ai-github-actions" role already exist in
+      # the target AWS account, with a trust policy scoped to this exact
+      # repo, and that its ARN is stored in the AWS_GITHUB_ACTIONS_ROLE_ARN
+      # repository secret. That one-time AWS-side setup is NOT part of
+      # this chunk -- until it exists, this step fails on every PR, which
+      # is expected, not a bug in this workflow. See infra/README.md.
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_GITHUB_ACTIONS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Plan
+        run: terraform plan -input=false -var="container_image=placeholder:latest"

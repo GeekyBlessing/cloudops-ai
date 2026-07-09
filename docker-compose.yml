@@ -1,0 +1,49 @@
+services:
+  dynamodb-local:
+    image: amazon/dynamodb-local:2.5.2
+    command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-inMemory"]
+    ports:
+      - "8001:8000"
+
+  dynamodb-init:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["python", "scripts/create_local_tables.py"]
+    environment:
+      CLOUDOPS_DYNAMODB_ENDPOINT_URL: http://dynamodb-local:8000
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local
+    depends_on:
+      - dynamodb-local
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      CLOUDOPS_USE_DYNAMODB: "true"
+      CLOUDOPS_DYNAMODB_ENDPOINT_URL: http://dynamodb-local:8000
+      CLOUDOPS_DYNAMODB_TABLE_INCIDENTS: cloudops-ai-incidents
+      CLOUDOPS_AWS_REGION: us-east-1
+      CLOUDOPS_USE_REAL_AWS: "false"
+      CLOUDOPS_REMEDIATION_MODE: dry_run
+      CLOUDOPS_CORS_ORIGINS: '["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:5173"]'
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local
+    depends_on:
+      dynamodb-init:
+        condition: service_completed_successfully
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: http://localhost:8000
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend

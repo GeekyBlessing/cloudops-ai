@@ -1,0 +1,287 @@
+/* Minimal, dependency-free styling -- no Tailwind/component library, kept
+   deliberately plain so the whole app stays reviewable as ordinary CSS.
+   Colors and spacing are defined as custom properties on :root so the
+   palette lives in exactly one place. */
+
+:root {
+  --color-bg: #0f172a;
+  --color-panel: #1e293b;
+  --color-border: #334155;
+  --color-text: #e2e8f0;
+  --color-text-muted: #94a3b8;
+  --color-accent: #38bdf8;
+
+  --tone-neutral-bg: #334155;
+  --tone-neutral-text: #cbd5e1;
+  --tone-info-bg: #1d4ed8;
+  --tone-info-text: #dbeafe;
+  --tone-warning-bg: #b45309;
+  --tone-warning-text: #fef3c7;
+  --tone-danger-bg: #b91c1c;
+  --tone-danger-text: #fee2e2;
+  --tone-success-bg: #15803d;
+  --tone-success-text: #dcfce7;
+
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
+
+.app-shell {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+.app-header {
+  margin-bottom: 1.5rem;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.app-subtitle {
+  margin: 0.25rem 0 0;
+  color: var(--color-text-muted);
+}
+
+.panel {
+  background: var(--color-panel);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 1.25rem;
+  margin-bottom: 1.5rem;
+}
+
+.panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.panel h2,
+.panel h3 {
+  margin-top: 0;
+}
+
+.muted {
+  color: var(--color-text-muted);
+}
+
+.empty-state {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.error-banner {
+  background: var(--tone-danger-bg);
+  color: var(--tone-danger-text);
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  margin-bottom: 1rem;
+}
+
+/* Forms */
+
+.stacked-form,
+.approval-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: 480px;
+}
+
+.approval-form {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.approval-form__actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+label {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+
+input[type="text"] {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  padding: 0.5rem 0.65rem;
+  border-radius: 6px;
+  font-size: 0.95rem;
+}
+
+button {
+  background: var(--color-accent);
+  color: #0f172a;
+  border: none;
+  border-radius: 6px;
+  padding: 0.5rem 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button.button--danger {
+  background: var(--tone-danger-bg);
+  color: var(--tone-danger-text);
+}
+
+.link-button {
+  background: none;
+  color: var(--color-accent);
+  padding: 0;
+  font-weight: 400;
+  text-decoration: underline;
+}
+
+/* Table */
+
+.incident-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.incident-table th,
+.incident-table td {
+  text-align: left;
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.9rem;
+}
+
+.incident-table a {
+  color: var(--color-accent);
+}
+
+/* Badges / tags */
+
+.badge-row {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.badge--neutral {
+  background: var(--tone-neutral-bg);
+  color: var(--tone-neutral-text);
+}
+
+.badge--info {
+  background: var(--tone-info-bg);
+  color: var(--tone-info-text);
+}
+
+.badge--warning {
+  background: var(--tone-warning-bg);
+  color: var(--tone-warning-text);
+}
+
+.badge--danger {
+  background: var(--tone-danger-bg);
+  color: var(--tone-danger-text);
+}
+
+.badge--success {
+  background: var(--tone-success-bg);
+  color: var(--tone-success-text);
+}
+
+.tag {
+  display: inline-block;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 0.1rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--color-text-muted);
+}
+
+/* Evidence + agent trace lists */
+
+.evidence-list,
+.agent-trace {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.evidence-item,
+.agent-trace__step {
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 0.75rem;
+}
+
+.evidence-item__header,
+.agent-trace__header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.evidence-item__summary,
+.agent-trace__reasoning {
+  margin: 0 0 0.4rem;
+}
+
+.agent-trace__tools {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.raw-block {
+  background: var(--color-bg);
+  border-radius: 6px;
+  padding: 0.6rem;
+  overflow-x: auto;
+  font-size: 0.8rem;
+  margin-top: 0.5rem;
+}

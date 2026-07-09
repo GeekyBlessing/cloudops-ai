@@ -1,0 +1,15 @@
+extends: default
+
+rules:
+  document-start: disable
+  # GitHub Actions workflows conventionally use unquoted `on:` -- PyYAML/
+  # yamllint's YAML-1.1 "truthy" check reads that as the boolean `true`,
+  # which is a well-known false positive for this specific file type
+  # (GitHub's own workflow parser handles it correctly as the string
+  # "on"). Quoting it as "on": to satisfy this rule would make every
+  # workflow file here look different from virtually every public example
+  # workflow on GitHub, which isn't worth it to silence a linter that's
+  # wrong about this one key.
+  truthy: disable
+  line-length:
+    max: 130
