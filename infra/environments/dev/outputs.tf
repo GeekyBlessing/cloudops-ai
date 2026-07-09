@@ -10,6 +10,14 @@ output "dynamodb_table_name" {
   value = module.dynamodb.table_name
 }
 
+output "ecr_repository_url" {
+  value = module.ecr.repository_url
+}
+
+output "sqs_queue_url" {
+  value = module.eventbridge.queue_url
+}
+
 output "monitoring_read_only_role_arn" {
   value = module.iam.monitoring_read_only_role_arn
 }

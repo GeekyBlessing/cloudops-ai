@@ -93,6 +93,17 @@ class Settings(BaseSettings):
         ),
     )
 
+    sqs_queue_url: str | None = Field(
+        default=None,
+        description=(
+            "URL of the incident-triggers SQS queue (infra/modules/eventbridge's queue_url "
+            "output). None (the default) disables the poller entirely -- local development "
+            "and the manual POST /incidents endpoint both work fine without it. Set via "
+            "CLOUDOPS_SQS_QUEUE_URL in any environment where infra/modules/eventbridge has "
+            "actually been applied. See services/sqs_incident_poller.py."
+        ),
+    )
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -23,6 +23,17 @@ this provider-agnostic: Claude, GPT-4o, or a local model all satisfy this
 interface, and a `FakeListChatModel` satisfies it too, which is how
 tests/unit/agents/test_graph.py exercises this file without calling a real
 LLM API.
+
+Bug fixed alongside the EventBridge/SQS trigger pipeline: classify_node's
+prompt used to be built from `incident.model_dump_json(include={"incident_id",
+"trigger_source"})` -- literally just an ID and an enum value, nothing about
+*what actually happened*. That was invisible while the only trigger path was
+the manual API endpoint (which itself barely carries more than an instance
+ARN), but it meant a real CloudWatch Alarm or GuardDuty Finding delivered via
+SQS would get classified blind, since none of the alarm/finding detail ever
+reached the LLM. The prompt now also includes `affected_resources` and
+`raw_trigger_payload`, so classification has the actual alarm name, finding
+type, severity, etc. to work with.
 """
 
 from __future__ import annotations
@@ -62,7 +73,9 @@ def make_classify_node(chat_model: BaseChatModel) -> Callable[[GraphState], Grap
         incident = state["incident"]
         step = AgentStep(step_id=str(uuid.uuid4()), agent=AgentName.COORDINATOR, reasoning="")
 
-        payload = incident.model_dump_json(include={"incident_id", "trigger_source"})
+        payload = incident.model_dump_json(
+            include={"incident_id", "trigger_source", "affected_resources", "raw_trigger_payload"}
+        )
         prompt = _CLASSIFY_PROMPT.format(payload=payload)
         response = chat_model.invoke([HumanMessage(content=prompt)])
         step.tool_calls.append("llm.classify")
@@ -72,6 +85,8 @@ def make_classify_node(chat_model: BaseChatModel) -> Callable[[GraphState], Grap
             incident_type = IncidentType(parsed["incident_type"])
             severity = Severity(parsed["severity"])
         except (json.JSONDecodeError, KeyError, ValueError) as exc:
+            # Fail safe: an unparseable or unrecognized classification leaves
+            # the incident UNKNOWN rather than crashing the graph or guessing.
             step.reasoning = f"Could not parse a valid classification from the model ({exc}); leaving as UNKNOWN."
             step.mark_completed()
             incident.add_agent_step(step)

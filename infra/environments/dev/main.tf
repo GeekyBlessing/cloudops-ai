@@ -1,5 +1,5 @@
-# Dev environment: wires the dynamodb, iam, and ecs modules together into
-# one deployable stack. This is intentionally the *only* environment
+# Dev environment: wires the dynamodb, ecr, iam, and ecs modules together
+# into one deployable stack. This is intentionally the *only* environment
 # provided so far -- staging/ and demo-live/ (the environment PROJECT_STRUCTURE.md
 # describes as the only one ever permitted to run with
 # CLOUDOPS_REMEDIATION_MODE=live) are follow-ups once this one is proven
@@ -23,19 +23,39 @@ module "dynamodb" {
   tags       = local.tags
 }
 
+module "ecr" {
+  source = "../../modules/ecr"
+
+  name_prefix = local.name_prefix
+  tags        = local.tags
+}
+
+module "eventbridge" {
+  source = "../../modules/eventbridge"
+
+  name_prefix = local.name_prefix
+  tags        = local.tags
+}
+
 module "iam" {
   source = "../../modules/iam"
 
   name_prefix        = local.name_prefix
   dynamodb_table_arn = module.dynamodb.table_arn
-  tags               = local.tags
+  sqs_queue_arn       = module.eventbridge.queue_arn
+  tags                = local.tags
 }
 
 module "ecs" {
   source = "../../modules/ecs"
 
-  name_prefix         = local.name_prefix
-  container_image     = var.container_image
+  name_prefix = local.name_prefix
+  # Built from the ECR module's own output rather than accepting an
+  # arbitrary external URI -- ties the deployed image directly to the
+  # repository this stack actually owns and manages the lifecycle policy
+  # for, instead of trusting a caller to pass a URI that happens to point
+  # at the right place.
+  container_image    = "${module.ecr.repository_url}:${var.image_tag}"
   task_role_arn       = module.iam.ecs_task_role_arn
   execution_role_arn  = module.iam.ecs_task_execution_role_arn
   desired_count       = var.desired_count
@@ -54,6 +74,7 @@ module "ecs" {
     # whoever deploys this will always remember to set it explicitly.
     { name = "CLOUDOPS_REMEDIATION_MODE", value = "dry_run" },
     { name = "CLOUDOPS_LOG_LEVEL", value = "INFO" },
+    { name = "CLOUDOPS_SQS_QUEUE_URL", value = module.eventbridge.queue_url },
   ]
 
   tags = local.tags

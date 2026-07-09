@@ -1,0 +1,105 @@
+name: Deploy
+
+# Manual trigger only, not "on: push: branches: [main]". This mirrors the
+# project's human-gated-by-default posture elsewhere (CLOUDOPS_REMEDIATION_MODE
+# defaults to dry_run; remediation actions require an HMAC-signed approval
+# token) -- deploying a new image and infra changes to a real AWS account
+# is exactly the kind of action that shouldn't happen automatically on
+# every merge to main without a human deciding "yes, now." Pair this with
+# a GitHub Environment (Settings -> Environments -> New environment, name
+# it "aws-dev" to match the `environment:` key below) with required
+# reviewers configured, for an actual approval gate enforced by GitHub
+# itself -- that configuration is repo-settings-side and can't be
+# expressed in this YAML file, same as the OIDC role setup below.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  # Lets this workflow exchange a short-lived GitHub-issued OIDC token for
+  # temporary AWS credentials -- no long-lived AWS access keys stored as a
+  # GitHub secret. Same mechanism as terraform-plan.yml, different role
+  # (see the comment on "Configure AWS credentials" below for why).
+  id-token: write
+
+defaults:
+  run:
+    working-directory: infra/environments/dev
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: aws-dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.9"
+
+      # Deliberately a DIFFERENT role from terraform-plan.yml's
+      # AWS_GITHUB_ACTIONS_ROLE_ARN. That role only needs read access to
+      # compute a plan and runs on every PR from any branch; this one needs
+      # broad write access (dynamodb, iam, ecs, ecr, logs -- everything
+      # this Terraform config manages) and only runs on a manual, reviewed
+      # dispatch. Reusing the plan role here would mean any PR able to
+      # trigger terraform-plan.yml could -- if that workflow were ever
+      # compromised or misconfigured -- assume a role capable of mutating
+      # production infrastructure. Two roles, two blast radii. This role
+      # (and its AWS_GITHUB_ACTIONS_DEPLOY_ROLE_ARN secret) needs one-time
+      # AWS-side setup, same as the plan role -- see infra/README.md.
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_GITHUB_ACTIONS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Terraform init
+        run: terraform init
+
+      # Chicken-and-egg: the ecs module needs an image to already exist at
+      # ecr.repository_url:image_tag, but the ECR repository itself has to
+      # exist before anything can be pushed to it. Applying just the ecr
+      # module first (idempotent -- a no-op if it already exists from a
+      # previous run) breaks that cycle without a separate bootstrap
+      # workflow. -target restricts this apply to ecr's resources only, so
+      # it can't touch ecs/iam/dynamodb even by accident; the placeholder
+      # image_tag value is never actually used for anything in this step.
+      - name: Ensure ECR repository exists
+        run: terraform apply -auto-approve -target=module.ecr -var="image_tag=bootstrap"
+
+      - name: Log in to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Get ECR repository URL
+        id: ecr-repo
+        run: echo "url=$(terraform output -raw ecr_repository_url)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Backend only -- there's no ECS service or S3+CloudFront
+      # distribution for the frontend yet (see infra/README.md's
+      # "Explicitly deferred" section), so building/pushing a frontend
+      # image here would just be storage nothing deploys. Add a second
+      # build-push step once frontend hosting is actually built.
+      #
+      # Tagged with the exact commit SHA that triggered this workflow --
+      # never "latest". Combined with the ecr module's IMMUTABLE tag
+      # setting, this guarantees "what's running" can always be traced
+      # back to an exact, unambiguous commit.
+      - name: Build and push backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          push: true
+          tags: ${{ steps.ecr-repo.outputs.url }}:${{ github.sha }}
+
+      - name: Terraform apply
+        run: terraform apply -auto-approve -var="image_tag=${{ github.sha }}"
+
+      - name: Summary
+        run: |
+          echo "Deployed ${{ steps.ecr-repo.outputs.url }}:${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "ECS service: $(terraform output -raw ecs_service_name)" >> "$GITHUB_STEP_SUMMARY"

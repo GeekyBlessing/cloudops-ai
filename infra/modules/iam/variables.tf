@@ -8,6 +8,11 @@ variable "dynamodb_table_arn" {
   type        = string
 }
 
+variable "sqs_queue_arn" {
+  description = "ARN of the incident-triggers SQS queue (modules/eventbridge's queue_arn output) -- MonitoringReadOnlyRole needs consume permissions on it since the backend's SQS poller runs under that role, same as every other read-only investigative call it makes."
+  type        = string
+}
+
 variable "tags" {
   description = "Common tags applied to all resources in this module."
   type        = map(string)

@@ -105,6 +105,22 @@ data "aws_iam_policy_document" "monitoring_read_only" {
       "${var.dynamodb_table_arn}/index/*",
     ]
   }
+
+  # The backend's SQS poller (services/sqs_incident_poller.py) runs under
+  # this role -- it's the same "investigate, don't mutate" capability as
+  # every other statement here, just consuming from a queue instead of
+  # calling a read-only AWS API. No SendMessage: the backend only ever
+  # consumes incident triggers, never produces them.
+  statement {
+    sid    = "IncidentTriggersQueueConsume"
+    effect = "Allow"
+    actions = [
+      "sqs:ReceiveMessage",
+      "sqs:DeleteMessage",
+      "sqs:GetQueueAttributes",
+    ]
+    resources = [var.sqs_queue_arn]
+  }
 }
 
 resource "aws_iam_role_policy" "monitoring_read_only" {

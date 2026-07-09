@@ -60,4 +60,4 @@ jobs:
           aws-region: us-east-1
 
       - name: Plan
-        run: terraform plan -input=false -var="container_image=placeholder:latest"
+        run: terraform plan -input=false -var="image_tag=placeholder"

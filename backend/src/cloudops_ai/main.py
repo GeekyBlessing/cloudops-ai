@@ -2,19 +2,60 @@
 
 `create_app()` builds the app rather than a bare module-level `app =
 FastAPI()`, so tests can construct a fresh app (with overridden
-dependencies) without import-order surprises, and so a future ASGI
-lifespan hook (e.g. warming a DynamoDB connection pool) has one obvious
-place to live.
+dependencies) without import-order surprises, and so the ASGI lifespan
+hook below (starting/stopping the SQS incident-trigger poller) has one
+obvious place to live.
 """
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+from collections.abc import AsyncIterator
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from cloudops_ai.api.dependencies import get_aws_tools, get_chat_model, get_incident_repository
 from cloudops_ai.api.routers import incidents, remediation
 from cloudops_ai.core.config import get_settings
 from cloudops_ai.core.logging import configure_logging
+from cloudops_ai.services.sqs_incident_poller import SQSIncidentPoller
+
+
+@contextlib.asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Starts the SQS incident-trigger poller as a background task, if
+    configured, and cancels it cleanly on shutdown rather than leaving it
+    dangling.
+
+    A no-op (yields immediately, nothing else happens) when
+    CLOUDOPS_SQS_QUEUE_URL isn't set, which is the default -- local
+    development and every existing test continue to work exactly as
+    before this was added. The poller reuses the exact same dependency
+    factories (get_incident_repository/get_aws_tools/get_chat_model) the
+    HTTP request handlers use, so it respects whatever CLOUDOPS_USE_DYNAMODB/
+    CLOUDOPS_USE_REAL_AWS/provider-key settings are already configured --
+    there's no separate "background task config" to keep in sync.
+    """
+    settings = get_settings()
+    poller_task: asyncio.Task[None] | None = None
+
+    if settings.sqs_queue_url:
+        poller = SQSIncidentPoller(
+            settings=settings,
+            repo=get_incident_repository(settings),
+            aws_tools=get_aws_tools(settings),
+            chat_model=get_chat_model(settings),
+        )
+        poller_task = asyncio.create_task(poller.run_forever())
+
+    yield
+
+    if poller_task is not None:
+        poller_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await poller_task
 
 
 def create_app() -> FastAPI:
@@ -29,6 +70,7 @@ def create_app() -> FastAPI:
             "them under human-gated approval."
         ),
         version="0.1.0",
+        lifespan=_lifespan,
     )
 
     # Required for frontend/ (a separate origin, e.g. http://localhost:5173

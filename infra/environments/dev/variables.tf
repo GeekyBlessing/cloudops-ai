@@ -3,8 +3,8 @@ variable "aws_region" {
   default = "us-east-1"
 }
 
-variable "container_image" {
-  description = "Backend container image URI. No default -- must be set explicitly (via terraform.tfvars or -var) once an image has actually been built and pushed. See infra/README.md; the build/push pipeline itself is a separate, not-yet-built piece of this project."
+variable "image_tag" {
+  description = "Docker image tag to deploy -- deploy.yml always passes this explicitly as the triggering commit's git SHA (e.g. -var=\"image_tag=abc123f\"), never a mutable tag like 'latest'. No default: a `terraform plan`/`apply` run without it fails fast and asks for one interactively, rather than silently deploying whatever 'latest' happens to point at. For a plan-only run (CI's terraform-plan.yml) any placeholder string works, since the image doesn't need to actually exist for `plan` to compute a diff -- see ecs module's container_image usage."
   type        = string
 }
 
