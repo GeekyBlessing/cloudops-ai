@@ -12,6 +12,13 @@ Unrouted incident types (UNKNOWN, and anything without dedicated specialist
 logic) go straight from classify to decide -- decide_node already fails
 closed (no remediation policy entry -> no plan proposed), so skipping
 straight to it is safe, not a shortcut around any check.
+
+IncidentType.PLATFORM_HEALTH_ALARM (coordinator.py's classify_node,
+domain/enums.py) is a deliberate example of this, not an oversight: this
+project's own monitoring alarms (infra/modules/monitoring) should never
+reach a specialist built to investigate customer AWS resources with
+customer-resource tools, so it's intentionally left out of the routing
+table below.
 """
 
 from __future__ import annotations

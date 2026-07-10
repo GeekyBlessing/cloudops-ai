@@ -26,6 +26,10 @@ class PolicyEntry:
     max_actions_per_incident: int = 1
 
 
+# The table itself. Deliberately explicit and exhaustive rather than
+# "clever" (e.g. no wildcard '*' entries) -- every row here is something a
+# human is expected to review and sign off on, which is the entire point of
+# having a table instead of letting the LLM decide unconstrained.
 REMEDIATION_POLICY: dict[tuple[IncidentType, Severity], PolicyEntry] = {
     (IncidentType.EC2_HIGH_CPU, Severity.HIGH): PolicyEntry(
         allowed_actions=frozenset({"reboot_instance", "scale_out"}),
@@ -58,13 +62,27 @@ REMEDIATION_POLICY: dict[tuple[IncidentType, Severity], PolicyEntry] = {
         allowed_actions=frozenset({"reset_desired_capacity"}),
     ),
     # HIGH_BILLING has no mutating actions on purpose -- cost anomalies get a
-    # recommendation in the report, never an automatic action.
+    # recommendation in the report, never an automatic action. Terminating or
+    # resizing a resource because a cost heuristic fired is exactly the kind
+    # of "confidently wrong" move an autonomous agent must not be allowed to
+    # make unsupervised.
+    #
+    # PLATFORM_HEALTH_ALARM has no entries at all, for any severity, also on
+    # purpose -- see domain/enums.py and coordinator.py. This project's own
+    # monitoring alarms should never result in a proposed remediation
+    # action; is_action_allowed()'s fail-closed default (no entry -> False)
+    # already guarantees that without a row needing to say so explicitly.
 }
 
 
 def is_action_allowed(incident_type: IncidentType, severity: Severity, action_name: str) -> bool:
     """The single choke point every proposed RemediationAction must pass
     through before it can become part of a RemediationPlan.
+
+    Returns False (fail closed) for any incident_type/severity combination
+    not explicitly present in the table above -- an unrecognized combination
+    is treated as "not yet reviewed for automated remediation," not "probably
+    fine."
     """
     entry = REMEDIATION_POLICY.get((incident_type, severity))
     if entry is None:

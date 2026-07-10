@@ -69,15 +69,24 @@ correct, so this was built incrementally across several chunks:
   builds/pushes the backend image. Add a second `aws_ecr_repository` in
   `modules/ecr` and a real hosting target when this gets built, rather
   than provisioning storage for an image nothing deploys.
-- **Alarm-to-incident-pipeline feedback loop.** `modules/monitoring`'s
-  alarms notify an SNS topic (optionally by email), but they are not
-  wired into `modules/eventbridge`'s CloudWatch-Alarm-state-change rule --
-  a DLQ or ECS-health alarm firing does not itself create an incident in
-  this system. Doing that on purpose (rather than as an accident of two
-  modules technically being able to reach each other) is a real follow-up:
-  it would mean this project's own infrastructure problems flow through
-  the same triage pipeline as the AWS resources it monitors on your
-  behalf, which is a bigger design decision than this chunk's scope.
+- ~~Alarm-to-incident-pipeline feedback loop~~ -- **correction, not a
+  build**: this bullet previously claimed `modules/monitoring`'s alarms
+  "are not wired into" `modules/eventbridge`'s CloudWatch-Alarm-state-change
+  rule. That was wrong. That rule has no alarm-ARN filter -- it matches
+  *any* CloudWatch alarm entering ALARM state in the account, which means
+  `modules/monitoring`'s alarms were already reaching the incident-triggers
+  queue the moment that module was applied, several chunks ago. The actual
+  gap was on the backend, not here: `coordinator.py`'s `classify_node` was
+  asking an LLM to force one of those alarms into an `IncidentType` meant
+  for customer AWS resources (a plausible misfire: the ECS CPU alarm
+  guessed as `EC2_HIGH_CPU`, routing to `monitoring_agent.py`, which would
+  call `get_metric_data` with the alarm's own ARN as an `InstanceId`
+  dimension -- not a crash, but a wrong, misleading investigation result).
+  Fixed with a deterministic `IncidentType.PLATFORM_HEALTH_ALARM`
+  classification in `coordinator.py`, checked before the LLM ever runs --
+  see that file's docstring for the full explanation. No Terraform changed
+  for this fix, which is exactly the point: the infra was already correct,
+  the backend's trust boundary around the LLM wasn't.
 - **staging/ and demo-live/ environments** -- only `environments/dev`
   exists. `demo-live` in particular (the only environment meant to ever run
   `CLOUDOPS_REMEDIATION_MODE=live`) is a real follow-up, not a rename of
