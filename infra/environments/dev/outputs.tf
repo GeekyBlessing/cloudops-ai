@@ -1,3 +1,7 @@
+output "vpc_id" {
+  value = module.networking.vpc_id
+}
+
 output "ecs_cluster_name" {
   value = module.ecs.cluster_name
 }
@@ -24,4 +28,12 @@ output "monitoring_read_only_role_arn" {
 
 output "remediation_executor_role_arn" {
   value = module.iam.remediation_executor_role_arn
+}
+
+output "monitoring_dashboard_url" {
+  value = module.monitoring.dashboard_url
+}
+
+output "monitoring_sns_topic_arn" {
+  value = module.monitoring.sns_topic_arn
 }

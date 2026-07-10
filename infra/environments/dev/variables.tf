@@ -12,3 +12,9 @@ variable "desired_count" {
   type    = number
   default = 1
 }
+
+variable "alert_email" {
+  description = "Email address subscribed to modules/monitoring's SNS alerts topic. No default and left null unless set -- see modules/monitoring's alert_email variable description for what happens if you don't set it (the topic and every alarm still get created, just nothing is notified until a subscription exists)."
+  type        = string
+  default     = null
+}

@@ -13,6 +13,22 @@ variable "container_port" {
   default = 8000
 }
 
+variable "vpc_id" {
+  description = "VPC the task's security group lives in -- from modules/networking's vpc_id output."
+  type        = string
+}
+
+variable "subnet_ids" {
+  description = "Subnets the Fargate task's ENI is placed in -- from modules/networking's public_subnet_ids output. Public, not private: the task still needs assign_public_ip=true to be directly reachable since there's no ALB yet (see infra/README.md)."
+  type        = list(string)
+}
+
+variable "allowed_ingress_cidr_blocks" {
+  description = "CIDR blocks allowed to reach the API port directly. Defaults to 0.0.0.0/0 (open to the internet) for portfolio-demo simplicity -- the same trade-off this module always had, just now a named, overridable variable instead of a literal buried in the security group resource. A real deployment could narrow this to a specific office/VPN CIDR, or (better) drop direct exposure entirely once an ALB module exists to front the task instead."
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+}
+
 variable "task_role_arn" {
   description = "IAM role the running container assumes at the application level -- from modules/iam's ecs_task_role_arn output."
   type        = string

@@ -1,12 +1,13 @@
-# Dev environment: wires the dynamodb, ecr, iam, and ecs modules together
-# into one deployable stack. This is intentionally the *only* environment
-# provided so far -- staging/ and demo-live/ (the environment PROJECT_STRUCTURE.md
-# describes as the only one ever permitted to run with
-# CLOUDOPS_REMEDIATION_MODE=live) are follow-ups once this one is proven
-# out, not because they're architecturally different, but because copying
-# this environment's shape twice more with different tfvars is mechanical
-# work that isn't worth doing before the first one has actually been
-# applied against a real account.
+# Dev environment: wires the networking, dynamodb, ecr, iam, ecs, and
+# monitoring modules together into one deployable stack. This is
+# intentionally the *only* environment provided so far -- staging/ and
+# demo-live/ (the environment PROJECT_STRUCTURE.md describes as the only
+# one ever permitted to run with CLOUDOPS_REMEDIATION_MODE=live) are
+# follow-ups once this one is proven out, not because they're
+# architecturally different, but because copying this environment's shape
+# twice more with different tfvars is mechanical work that isn't worth
+# doing before the first one has actually been applied against a real
+# account.
 
 locals {
   name_prefix = "cloudops-ai-dev"
@@ -14,6 +15,13 @@ locals {
     Project     = "cloudops-ai"
     Environment = "dev"
   }
+}
+
+module "networking" {
+  source = "../../modules/networking"
+
+  name_prefix = local.name_prefix
+  tags        = local.tags
 }
 
 module "dynamodb" {
@@ -56,6 +64,8 @@ module "ecs" {
   # for, instead of trusting a caller to pass a URI that happens to point
   # at the right place.
   container_image    = "${module.ecr.repository_url}:${var.image_tag}"
+  vpc_id              = module.networking.vpc_id
+  subnet_ids          = module.networking.public_subnet_ids
   task_role_arn       = module.iam.ecs_task_role_arn
   execution_role_arn  = module.iam.ecs_task_execution_role_arn
   desired_count       = var.desired_count
@@ -78,4 +88,16 @@ module "ecs" {
   ]
 
   tags = local.tags
+}
+
+module "monitoring" {
+  source = "../../modules/monitoring"
+
+  name_prefix      = local.name_prefix
+  ecs_cluster_name = module.ecs.cluster_name
+  ecs_service_name = module.ecs.service_name
+  sqs_queue_name   = module.eventbridge.queue_name
+  sqs_dlq_name     = module.eventbridge.dlq_name
+  alert_email      = var.alert_email
+  tags             = local.tags
 }

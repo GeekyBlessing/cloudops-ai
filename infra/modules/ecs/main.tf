@@ -1,39 +1,30 @@
-# Minimal Fargate deployment: no ALB, no custom VPC -- the task runs in the
-# account's default VPC/subnets with a public IP, which is enough to prove
-# "this runs as a real container in real AWS" for a portfolio project. A
-# production deployment needs an ALB (stable DNS name, TLS termination) and
-# a purpose-built VPC (private subnets for the task, a NAT gateway or VPC
-# endpoints for outbound AWS API calls) -- both are explicitly out of scope
-# for this module and tracked as a follow-up in infra/README.md, not
-# silently skipped.
+# Fargate deployment behind a custom VPC (modules/networking), still with
+# no ALB: the task runs in a public subnet with a public IP, which is
+# enough to prove "this runs as a real container in real AWS" for a
+# portfolio project. A production deployment needs an ALB (stable DNS
+# name, TLS termination) and private subnets for the task with a NAT
+# gateway or VPC endpoints for outbound AWS API calls -- both are
+# explicitly out of scope for this module and tracked as a follow-up in
+# infra/README.md, not silently skipped.
 
 data "aws_region" "current" {}
-
-data "aws_vpc" "default" {
-  default = true
-}
-
-data "aws_subnets" "default" {
-  filter {
-    name   = "vpc-id"
-    values = [data.aws_vpc.default.id]
-  }
-}
 
 resource "aws_security_group" "backend" {
   name        = "${var.name_prefix}-backend"
   description = "CloudOps AI backend task -- inbound API traffic, unrestricted outbound for AWS API calls"
-  vpc_id      = data.aws_vpc.default.id
+  vpc_id      = var.vpc_id
 
   ingress {
     description = "API traffic"
     from_port   = var.container_port
     to_port     = var.container_port
     protocol    = "tcp"
-    # Open to the internet for portfolio-demo simplicity -- a production
-    # deployment would restrict this to an ALB security group instead of
-    # exposing the task directly. See module docstring above.
-    cidr_blocks = ["0.0.0.0/0"]
+    # var.allowed_ingress_cidr_blocks defaults to 0.0.0.0/0 (open to the
+    # internet) for portfolio-demo simplicity -- a production deployment
+    # would either override this to a narrower CIDR or, better, remove
+    # direct exposure entirely and put an ALB security group here instead.
+    # See module docstring above.
+    cidr_blocks = var.allowed_ingress_cidr_blocks
   }
 
   egress {
@@ -100,7 +91,7 @@ resource "aws_ecs_service" "backend" {
   launch_type     = "FARGATE"
 
   network_configuration {
-    subnets          = data.aws_subnets.default.ids
+    subnets          = var.subnet_ids
     security_groups  = [aws_security_group.backend.id]
     assign_public_ip = true
   }
