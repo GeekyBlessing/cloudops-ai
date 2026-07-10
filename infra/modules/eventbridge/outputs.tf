@@ -8,6 +8,16 @@ output "queue_arn" {
   value       = aws_sqs_queue.incident_triggers.arn
 }
 
+output "queue_name" {
+  description = "Feeds modules/monitoring's SQS alarm dimensions -- CloudWatch's AWS/SQS metrics are dimensioned by QueueName, not ARN or URL."
+  value       = aws_sqs_queue.incident_triggers.name
+}
+
 output "dlq_url" {
   value = aws_sqs_queue.incident_triggers_dlq.id
+}
+
+output "dlq_name" {
+  description = "Feeds modules/monitoring's DLQ depth alarm -- see queue_name's description for why QueueName specifically."
+  value       = aws_sqs_queue.incident_triggers_dlq.name
 }
