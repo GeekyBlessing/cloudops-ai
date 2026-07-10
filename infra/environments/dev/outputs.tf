@@ -2,6 +2,11 @@ output "vpc_id" {
   value = module.networking.vpc_id
 }
 
+output "alb_dns_name" {
+  description = "The backend's stable public address -- point frontend/.env.local's VITE_API_BASE_URL at http://<this value>. Replaces the old floating task public IP, which changed on every redeploy."
+  value       = module.alb.alb_dns_name
+}
+
 output "ecs_cluster_name" {
   value = module.ecs.cluster_name
 }

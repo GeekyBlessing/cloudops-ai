@@ -19,14 +19,24 @@ variable "vpc_id" {
 }
 
 variable "subnet_ids" {
-  description = "Subnets the Fargate task's ENI is placed in -- from modules/networking's public_subnet_ids output. Public, not private: the task still needs assign_public_ip=true to be directly reachable since there's no ALB yet (see infra/README.md)."
+  description = "Subnets the Fargate task's ENI is placed in -- from modules/networking's private_subnet_ids output (not public anymore). The task has no public IP; modules/alb's load balancer, in the public subnets, is the only inbound path."
   type        = list(string)
 }
 
-variable "allowed_ingress_cidr_blocks" {
-  description = "CIDR blocks allowed to reach the API port directly. Defaults to 0.0.0.0/0 (open to the internet) for portfolio-demo simplicity -- the same trade-off this module always had, just now a named, overridable variable instead of a literal buried in the security group resource. A real deployment could narrow this to a specific office/VPN CIDR, or (better) drop direct exposure entirely once an ALB module exists to front the task instead."
-  type        = list(string)
-  default     = ["0.0.0.0/0"]
+variable "alb_security_group_id" {
+  description = "From modules/alb's alb_security_group_id output. The task's security group only accepts inbound traffic sourced from this security group -- see this module's main.tf docstring for why that replaced the old CIDR-block-based ingress."
+  type        = string
+}
+
+variable "target_group_arn" {
+  description = "From modules/alb's target_group_arn output. Wired into the aws_ecs_service's load_balancer block so ECS registers/deregisters running tasks against it automatically as the service scales or replaces tasks."
+  type        = string
+}
+
+variable "health_check_grace_period_seconds" {
+  description = "How long a newly-started task gets before the ALB's health check failures start counting against it. Needs to comfortably exceed image pull + application startup time -- too short and a slow-starting task gets cycled before it ever passes a check; too long just delays noticing a task that's genuinely stuck."
+  type        = number
+  default     = 60
 }
 
 variable "task_role_arn" {

@@ -1,4 +1,4 @@
-# Dev environment: wires the networking, dynamodb, ecr, iam, ecs, and
+# Dev environment: wires the networking, alb, dynamodb, ecr, iam, ecs, and
 # monitoring modules together into one deployable stack. This is
 # intentionally the *only* environment provided so far -- staging/ and
 # demo-live/ (the environment PROJECT_STRUCTURE.md describes as the only
@@ -22,6 +22,15 @@ module "networking" {
 
   name_prefix = local.name_prefix
   tags        = local.tags
+}
+
+module "alb" {
+  source = "../../modules/alb"
+
+  name_prefix       = local.name_prefix
+  vpc_id            = module.networking.vpc_id
+  public_subnet_ids = module.networking.public_subnet_ids
+  tags              = local.tags
 }
 
 module "dynamodb" {
@@ -65,7 +74,9 @@ module "ecs" {
   # at the right place.
   container_image    = "${module.ecr.repository_url}:${var.image_tag}"
   vpc_id              = module.networking.vpc_id
-  subnet_ids          = module.networking.public_subnet_ids
+  subnet_ids          = module.networking.private_subnet_ids
+  alb_security_group_id = module.alb.alb_security_group_id
+  target_group_arn      = module.alb.target_group_arn
   task_role_arn       = module.iam.ecs_task_role_arn
   execution_role_arn  = module.iam.ecs_task_execution_role_arn
   desired_count       = var.desired_count
@@ -88,6 +99,13 @@ module "ecs" {
   ]
 
   tags = local.tags
+
+  # The service's load_balancer block references module.alb's target
+  # group ARN, which Terraform already tracks as a dependency -- but that
+  # alone doesn't guarantee the *listener* exists yet, and ECS can fail to
+  # register the first task if it doesn't. Depending on the whole module
+  # forces every ALB resource, including the listener, to exist first.
+  depends_on = [module.alb]
 }
 
 module "monitoring" {

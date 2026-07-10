@@ -1,30 +1,29 @@
-# Fargate deployment behind a custom VPC (modules/networking), still with
-# no ALB: the task runs in a public subnet with a public IP, which is
-# enough to prove "this runs as a real container in real AWS" for a
-# portfolio project. A production deployment needs an ALB (stable DNS
-# name, TLS termination) and private subnets for the task with a NAT
-# gateway or VPC endpoints for outbound AWS API calls -- both are
-# explicitly out of scope for this module and tracked as a follow-up in
-# infra/README.md, not silently skipped.
+# Fargate deployment behind an ALB (modules/alb) in private subnets
+# (modules/networking): the task itself has no public IP and is not
+# directly reachable from the internet -- only the ALB is. This replaces
+# the earlier public-subnet-with-a-public-IP setup, which was fine for
+# proving "this runs as a real container in real AWS" but exposed the raw
+# container port directly. TLS/HTTPS still isn't in scope (no domain name
+# to get an ACM certificate for) -- see infra/README.md.
 
 data "aws_region" "current" {}
 
 resource "aws_security_group" "backend" {
   name        = "${var.name_prefix}-backend"
-  description = "CloudOps AI backend task -- inbound API traffic, unrestricted outbound for AWS API calls"
+  description = "CloudOps AI backend task -- inbound API traffic from the ALB only, unrestricted outbound for AWS API calls"
   vpc_id      = var.vpc_id
 
   ingress {
-    description = "API traffic"
+    description = "API traffic from the ALB only"
     from_port   = var.container_port
     to_port     = var.container_port
     protocol    = "tcp"
-    # var.allowed_ingress_cidr_blocks defaults to 0.0.0.0/0 (open to the
-    # internet) for portfolio-demo simplicity -- a production deployment
-    # would either override this to a narrower CIDR or, better, remove
-    # direct exposure entirely and put an ALB security group here instead.
-    # See module docstring above.
-    cidr_blocks = var.allowed_ingress_cidr_blocks
+    # Sourced from the ALB's own security group, not a CIDR block -- the
+    # task is in a private subnet with no public IP, so the ALB is the
+    # only thing that can reach it inbound at all. This is the "put an
+    # ALB security group here instead" this module's docstring used to
+    # describe as a future improvement; it's built now.
+    security_groups = [var.alb_security_group_id]
   }
 
   egress {
@@ -90,10 +89,25 @@ resource "aws_ecs_service" "backend" {
   desired_count   = var.desired_count
   launch_type     = "FARGATE"
 
+  # Gives a newly-started task time to actually come up (image pull +
+  # app startup) before the ALB's health check failures start counting
+  # against it -- without this, a slow-starting task can get marked
+  # unhealthy and cycled before it ever gets a chance to pass a check.
+  health_check_grace_period_seconds = var.health_check_grace_period_seconds
+
+  load_balancer {
+    target_group_arn = var.target_group_arn
+    container_name   = "backend"
+    container_port   = var.container_port
+  }
+
   network_configuration {
-    subnets          = var.subnet_ids
-    security_groups  = [aws_security_group.backend.id]
-    assign_public_ip = true
+    subnets         = var.subnet_ids
+    security_groups = [aws_security_group.backend.id]
+    # False now that the task lives in a private subnet (modules/networking)
+    # and is fronted by modules/alb -- it doesn't need, and shouldn't have,
+    # a public IP of its own anymore.
+    assign_public_ip = false
   }
 
   tags = var.tags
