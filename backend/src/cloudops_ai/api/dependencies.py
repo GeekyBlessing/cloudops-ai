@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from fastapi import Depends
+from fastapi import Depends, Header, HTTPException
 from langchain_core.language_models import BaseChatModel
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
@@ -145,3 +145,29 @@ def get_chat_model(settings: Settings = Depends(get_settings)) -> BaseChatModel:
         return ChatOpenAI(model=settings.openai_model, api_key=settings.openai_api_key)
 
     return _fallback_chat_model()
+
+
+def require_api_key(
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+    settings: Settings = Depends(get_settings),
+) -> None:
+    """Enforces the shared-secret API key, when one is configured.
+
+    settings.api_key defaults to None, which disables auth entirely -- see
+    core/config.py's field description. That's a deliberate default for
+    local development (zero setup to hit the API from a curl command or
+    the dashboard), not an oversight. Once CLOUDOPS_API_KEY is set in any
+    deployed environment, every request to a protected route must echo it
+    back via the X-API-Key header or get a 401 before the route handler
+    ever runs.
+
+    A dependency, not middleware: middleware would also have to special-case
+    /health (an ECS task's health check has no way to attach a header), and
+    FastAPI's per-router `dependencies=[Depends(require_api_key)]` already
+    gives that for free -- /health is defined directly on `app` in main.py,
+    outside both protected routers, so it's never touched by this at all.
+    """
+    if settings.api_key is None:
+        return
+    if x_api_key != settings.api_key:
+        raise HTTPException(status_code=401, detail="Missing or invalid API key")

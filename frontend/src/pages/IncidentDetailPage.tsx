@@ -32,7 +32,13 @@ export function IncidentDetailPage() {
       const data = await getIncident(incidentId);
       setIncident(data);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to load incident.");
+      setError(
+        err instanceof ApiError
+          ? err.isAuthError
+            ? `${err.message} -- set it via the "API key" control in the header above.`
+            : err.message
+          : "Failed to load incident.",
+      );
     } finally {
       setIsLoading(false);
     }
@@ -50,7 +56,13 @@ export function IncidentDetailPage() {
       await approveRemediation(incidentId, approverName.trim());
       await refresh();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to approve remediation.");
+      setError(
+        err instanceof ApiError
+          ? err.isAuthError
+            ? `${err.message} -- set it via the "API key" control in the header above.`
+            : err.message
+          : "Failed to approve remediation.",
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -64,7 +76,13 @@ export function IncidentDetailPage() {
       await rejectRemediation(incidentId);
       await refresh();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to reject remediation.");
+      setError(
+        err instanceof ApiError
+          ? err.isAuthError
+            ? `${err.message} -- set it via the "API key" control in the header above.`
+            : err.message
+          : "Failed to reject remediation.",
+      );
     } finally {
       setIsSubmitting(false);
     }

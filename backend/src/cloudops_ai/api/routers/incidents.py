@@ -2,11 +2,15 @@
 
 Exposes list, get-one, and create-and-run. "Create" synchronously drives the
 incident through the full LangGraph skeleton (classify -> gather_metrics ->
-decide) and returns the finished IncidentState -- there's no background
-worker/queue yet (that's the EventBridge -> SQS -> ECS pipeline described in
-/docs/ARCHITECTURE.md), so for now this endpoint IS the pipeline, callable
-directly over HTTP. That's a deliberate, temporary simplification, not an
-architectural claim about how this should work in production.
+decide) and returns the finished IncidentState. This is the manual/API entry
+point -- a curl command or the dashboard's "New incident" form. The other
+entry point, services/sqs_incident_poller.py, drives the exact same graph
+from real CloudWatch Alarms/GuardDuty findings via EventBridge -> SQS; this
+router doesn't need to know that path exists, since both converge on the
+same IncidentState/graph.invoke() machinery.
+
+Protected by require_api_key (api/dependencies.py) when CLOUDOPS_API_KEY is
+set -- a no-op otherwise.
 """
 
 from __future__ import annotations
@@ -19,14 +23,23 @@ from pydantic import BaseModel, Field
 
 from cloudops_ai.agents.graph import build_graph
 from cloudops_ai.agents.state import build_initial_state
-from cloudops_ai.api.dependencies import get_aws_tools, get_chat_model, get_incident_repository
+from cloudops_ai.api.dependencies import (
+    get_aws_tools,
+    get_chat_model,
+    get_incident_repository,
+    require_api_key,
+)
 from cloudops_ai.domain.enums import TriggerSource
 from cloudops_ai.domain.models.incident import IncidentState
 from cloudops_ai.domain.models.resource import ResourceRef
 from cloudops_ai.repositories.interfaces import IIncidentRepository
 from cloudops_ai.tools.interfaces import IReadOnlyAWSTools
 
-router = APIRouter(prefix="/incidents", tags=["incidents"])
+# dependencies=[...] applies require_api_key to every route on this router --
+# a no-op when settings.api_key is None (the default), a 401 gate otherwise.
+# See api/dependencies.py's require_api_key docstring for why this is a
+# router-level dependency rather than app-wide middleware.
+router = APIRouter(prefix="/incidents", tags=["incidents"], dependencies=[Depends(require_api_key)])
 
 
 class IncidentSummary(BaseModel):
@@ -87,10 +100,13 @@ def create_incident(
 ) -> IncidentState:
     """Create a new incident and synchronously run it through the agent graph.
 
-    Synchronous-and-blocking is a known, called-out limitation: a real
-    deployment runs this off the EventBridge -> SQS -> ECS pipeline, not
-    inline in a request handler. This endpoint exists so the whole pipeline
-    is exercisable with one curl command during development.
+    Synchronous-and-blocking is a known, deliberate limitation of THIS entry
+    point specifically -- real AWS-triggered incidents go through
+    services/sqs_incident_poller.py's background task instead, which runs
+    the same graph without blocking an HTTP request. This endpoint stays
+    synchronous because its whole point is being exercisable with one curl
+    command during development, where waiting a few seconds for a response
+    is the more useful behavior than a fire-and-forget 202.
     """
     arn_parts = request.instance_arn.split(":")
     resource = ResourceRef(

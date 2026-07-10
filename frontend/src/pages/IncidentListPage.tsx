@@ -27,7 +27,13 @@ export function IncidentListPage() {
       const data = await listIncidents();
       setIncidents(data);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to load incidents.");
+      setError(
+        err instanceof ApiError
+          ? err.isAuthError
+            ? `${err.message} -- set it via the "API key" control in the header above.`
+            : err.message
+          : "Failed to load incidents.",
+      );
     } finally {
       setIsLoading(false);
     }
@@ -49,7 +55,13 @@ export function IncidentListPage() {
       await createIncident({ instance_arn: instanceArn });
       await refresh();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to create incident.");
+      setError(
+        err instanceof ApiError
+          ? err.isAuthError
+            ? `${err.message} -- set it via the "API key" control in the header above.`
+            : err.message
+          : "Failed to create incident.",
+      );
     } finally {
       setIsCreating(false);
     }

@@ -13,7 +13,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from cloudops_ai.api.dependencies import get_incident_repository, get_mutating_aws_tools
+from cloudops_ai.api.dependencies import get_incident_repository, get_mutating_aws_tools, require_api_key
 from cloudops_ai.core.config import Settings, get_settings
 from cloudops_ai.domain.enums import RemediationStatus
 from cloudops_ai.domain.models.incident import IncidentState
@@ -21,7 +21,12 @@ from cloudops_ai.repositories.interfaces import IIncidentRepository
 from cloudops_ai.services.approval_service import approve_and_execute, reject_remediation
 from cloudops_ai.tools.interfaces import IMutatingAWSTools
 
-router = APIRouter(prefix="/remediation", tags=["remediation"])
+# Same require_api_key gate as /incidents -- see that router (and
+# api/dependencies.py's require_api_key docstring) for the full rationale.
+# This router in particular is the one that can trigger a real AWS mutation,
+# so leaving it unauthenticated in any deployed environment would be a real
+# gap in the human-in-the-loop story, not just a nice-to-have.
+router = APIRouter(prefix="/remediation", tags=["remediation"], dependencies=[Depends(require_api_key)])
 
 
 class ApprovalRequest(BaseModel):

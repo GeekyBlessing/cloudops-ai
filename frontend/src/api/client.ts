@@ -7,6 +7,7 @@
  * or how errors are formatted. Components never call `fetch` directly.
  */
 
+import { getApiKey } from "./apiKey";
 import type {
   ApprovalRequest,
   CreateIncidentRequest,
@@ -24,6 +25,11 @@ const API_BASE_URL: string = import.meta.env.VITE_API_BASE_URL ?? "http://localh
  * backend returned FastAPI's standard `{"detail": "..."}` error shape, that
  * detail message -- which is usually specific enough to show directly in
  * the UI (e.g. "Plan status is 'verified', not 'awaiting_approval'").
+ *
+ * `isAuthError` specifically flags a 401 from require_api_key
+ * (api/dependencies.py) so the UI can react by nudging the user toward the
+ * Settings panel, rather than just showing a generic error banner for
+ * something the user can actually fix in one click.
  */
 export class ApiError extends Error {
   readonly status: number;
@@ -33,12 +39,23 @@ export class ApiError extends Error {
     this.name = "ApiError";
     this.status = status;
   }
+
+  get isAuthError(): boolean {
+    return this.status === 401;
+  }
 }
 
 async function request<TResponse>(path: string, init?: RequestInit): Promise<TResponse> {
+  const apiKey = getApiKey();
+  const headers: HeadersInit = {
+    "Content-Type": "application/json",
+    ...(apiKey ? { "X-API-Key": apiKey } : {}),
+    ...init?.headers,
+  };
+
   const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: { "Content-Type": "application/json" },
     ...init,
+    headers,
   });
 
   if (!response.ok) {
