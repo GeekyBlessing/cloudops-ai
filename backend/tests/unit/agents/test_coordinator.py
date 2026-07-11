@@ -176,3 +176,19 @@ def test_customer_cloudwatch_alarm_still_goes_through_the_llm() -> None:
 
     assert len(spy.received_messages) == 1
     assert result["incident"].incident_type == IncidentType.EC2_HIGH_CPU
+
+
+def test_cloudwatch_alarm_incident_with_no_affected_resources_goes_through_the_llm() -> None:
+    """A CLOUDWATCH_ALARM-triggered incident that (for whatever reason)
+    carries no affected_resources yet can't be checked against the
+    platform-alarm name suffixes. _platform_health_alarm_severity must
+    return None here -- not crash on an empty list index -- and let normal
+    LLM classification proceed, exactly like the MANUAL case above.
+    """
+    incident = IncidentState(incident_id="incident-6", trigger_source=TriggerSource.CLOUDWATCH_ALARM)
+    assert incident.affected_resources == []
+    spy = _SpyChatModel(response_content='{"incident_type": "unknown", "severity": "low"}')
+    classify_node = make_classify_node(spy)
+    result = classify_node(build_initial_state(incident))
+    assert len(spy.received_messages) == 1
+    assert result["incident"].incident_type == IncidentType.UNKNOWN
