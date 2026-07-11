@@ -197,3 +197,145 @@ def test_poller_requires_sqs_queue_url() -> None:
 
     with pytest.raises(ValueError, match="sqs_queue_url"):
         SQSIncidentPoller(settings=settings, repo=repo, aws_tools=aws_tools, chat_model=chat_model)
+
+
+_GUARDDUTY_EVENT_WITH_S3_BUCKET = {
+    "version": "0",
+    "detail-type": "GuardDuty Finding",
+    "source": "aws.guardduty",
+    "account": "123456789012",
+    "region": "us-east-1",
+    "resources": [],
+    "detail": {
+        "type": "Policy:S3/BucketPublic",
+        "title": "S3 bucket is publicly accessible",
+        "severity": 5.0,
+        "arn": "arn:aws:guardduty:us-east-1:123456789012:detector/d1/finding/f3",
+        "resource": {
+            "s3BucketDetails": [
+                {"arn": "arn:aws:s3:::my-exposed-bucket", "name": "my-exposed-bucket"}
+            ]
+        },
+    },
+}
+
+_UNKNOWN_DETAIL_TYPE_EVENT = {
+    "version": "0",
+    "detail-type": "Something Else Entirely",
+    "source": "aws.somewhere",
+    "account": "123456789012",
+    "region": "us-east-1",
+    "resources": [],
+    "detail": {},
+}
+
+
+def test_guardduty_event_with_s3_bucket_details_builds_s3_resource() -> None:
+    """The s3BucketDetails branch of _resource_from_guardduty_event has no
+    test yet -- only the EC2 and unrecognized-fallback branches do.
+    """
+    incident = build_incident_from_event(_GUARDDUTY_EVENT_WITH_S3_BUCKET)
+    assert incident is not None
+    assert incident.affected_resources[0].arn == "arn:aws:s3:::my-exposed-bucket"
+    assert incident.affected_resources[0].resource_type == "AWS::S3::Bucket"
+    assert incident.affected_resources[0].name == "my-exposed-bucket"
+
+
+@mock_aws
+def test_poll_once_deletes_message_with_unknown_detail_type_without_creating_incident() -> None:
+    """build_incident_from_event returning None for an unrecognized
+    detail-type is already covered directly (test_unknown_detail_type_returns_none
+    above) -- this covers the other half: _process_message must still
+    delete that message from the queue rather than leave it to redrive to
+    the DLQ for something it already knows it will never process.
+    """
+    sqs = boto3.client("sqs", region_name="us-east-1")
+    queue_url = sqs.create_queue(QueueName="incident-triggers")["QueueUrl"]
+    sqs.send_message(QueueUrl=queue_url, MessageBody=json.dumps(_UNKNOWN_DETAIL_TYPE_EVENT))
+    settings = Settings(sqs_queue_url=queue_url, aws_region="us-east-1")
+    repo = InMemoryIncidentRepository()
+    aws_tools = MockAWSGateway()
+    chat_model = FakeListChatModel(responses=[])
+    poller = SQSIncidentPoller(settings=settings, repo=repo, aws_tools=aws_tools, chat_model=chat_model)
+
+    processed = poller.poll_once()
+
+    assert processed == 1
+    assert repo.list_all() == []
+    remaining = sqs.receive_message(QueueUrl=queue_url, WaitTimeSeconds=0)
+    assert "Messages" not in remaining
+
+
+# --- run_forever: the background loop itself --------------------------------
+# poll_once() is tested exhaustively above; run_forever is a thin async
+# wrapper (asyncio.to_thread + CancelledError propagation + retry-after-
+# failure), untested until now since nothing else in this file exercises it.
+
+
+@pytest.mark.asyncio
+async def test_run_forever_propagates_cancellation_cleanly() -> None:
+    import asyncio
+
+    settings = Settings(sqs_queue_url="https://sqs.us-east-1.amazonaws.com/123456789012/test-queue")
+    repo = InMemoryIncidentRepository()
+    aws_tools = MockAWSGateway()
+    chat_model = FakeListChatModel(responses=[])
+    poller = SQSIncidentPoller(settings=settings, repo=repo, aws_tools=aws_tools, chat_model=chat_model)
+    poller.poll_once = lambda: 0
+
+    task = asyncio.create_task(poller.run_forever())
+    await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.asyncio
+async def test_run_forever_logs_and_keeps_looping_after_poll_once_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A poll_once() failure (receive_message itself failing -- network
+    blip, throttling) must not kill the background task for the rest of
+    the app's lifetime -- it logs and keeps looping.
+    Uses the real asyncio.to_thread (genuine executor-based scheduling,
+    which actually yields to the event loop when the thread completes --
+    a fake no-await stub would not) and only short-circuits the specific
+    5-second retry delay, so the test doesn't need to wait 5 real seconds
+    per loop iteration to observe a second call.
+    """
+    import asyncio
+
+    settings = Settings(sqs_queue_url="https://sqs.us-east-1.amazonaws.com/123456789012/test-queue")
+    repo = InMemoryIncidentRepository()
+    aws_tools = MockAWSGateway()
+    chat_model = FakeListChatModel(responses=[])
+    poller = SQSIncidentPoller(settings=settings, repo=repo, aws_tools=aws_tools, chat_model=chat_model)
+
+    call_count = 0
+
+    def _always_fails() -> int:
+        nonlocal call_count
+        call_count += 1
+        raise RuntimeError("simulated receive_message failure")
+
+    poller.poll_once = _always_fails
+
+    real_sleep = asyncio.sleep
+
+    async def _skip_the_five_second_retry_delay(seconds: float) -> None:
+        if seconds == 5:
+            return
+        await real_sleep(seconds)
+
+    monkeypatch.setattr(asyncio, "sleep", _skip_the_five_second_retry_delay)
+
+    task = asyncio.create_task(poller.run_forever())
+    for _ in range(50):
+        await asyncio.sleep(0.01)
+        if call_count >= 2:
+            break
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert call_count >= 2
