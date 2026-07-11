@@ -113,3 +113,73 @@ def test_seeded_guardduty_findings_filtered_by_severity_threshold() -> None:
 def test_get_guardduty_findings_returns_empty_by_default() -> None:
     gateway = MockAWSGateway()
     assert gateway.get_guardduty_findings() == []
+
+
+def test_get_bucket_public_access_returns_false_for_unseeded_bucket() -> None:
+    gateway = MockAWSGateway()
+    assert gateway.get_bucket_public_access("no-such-bucket") is False
+
+
+def test_revoke_public_access_on_unseeded_bucket_still_logs_mutation() -> None:
+    """The bucket isn't in `_resources` (never seeded), so there's nothing
+    to flip to non-public -- but the call should still be recorded, since
+    the mutation log is meant to reflect "this action was invoked", not
+    "this action found a matching fixture".
+    """
+    gateway = MockAWSGateway()
+    gateway.revoke_public_access("no-such-bucket")
+    assert gateway.mutation_log == [{"action": "revoke_public_access", "bucket_name": "no-such-bucket"}]
+
+
+def test_start_instance_is_recorded_in_mutation_log() -> None:
+    gateway = MockAWSGateway()
+    gateway.start_instance("i-0abcd1234")
+    assert gateway.mutation_log == [{"action": "start_instance", "instance_id": "i-0abcd1234"}]
+
+
+def test_scale_out_is_recorded_in_mutation_log() -> None:
+    gateway = MockAWSGateway()
+    gateway.scale_out(auto_scaling_group_name="my-asg", increment=2)
+    assert gateway.mutation_log == [
+        {"action": "scale_out", "auto_scaling_group_name": "my-asg", "increment": 2}
+    ]
+
+
+def test_detach_overly_permissive_policy_is_recorded_in_mutation_log() -> None:
+    gateway = MockAWSGateway()
+    gateway.detach_overly_permissive_policy(role_name="my-role", policy_arn="arn:aws:iam::123456789012:policy/Admin")
+    assert gateway.mutation_log == [
+        {
+            "action": "detach_overly_permissive_policy",
+            "role_name": "my-role",
+            "policy_arn": "arn:aws:iam::123456789012:policy/Admin",
+        }
+    ]
+
+
+def test_rollback_function_version_is_recorded_in_mutation_log() -> None:
+    gateway = MockAWSGateway()
+    gateway.rollback_function_version(function_name="my-function", target_version="3")
+    assert gateway.mutation_log == [
+        {"action": "rollback_function_version", "function_name": "my-function", "target_version": "3"}
+    ]
+
+
+def test_increase_storage_allocation_is_recorded_in_mutation_log() -> None:
+    gateway = MockAWSGateway()
+    gateway.increase_storage_allocation(db_instance_identifier="my-db", new_allocated_storage_gb=200)
+    assert gateway.mutation_log == [
+        {
+            "action": "increase_storage_allocation",
+            "db_instance_identifier": "my-db",
+            "new_allocated_storage_gb": 200,
+        }
+    ]
+
+
+def test_reset_desired_capacity_is_recorded_in_mutation_log() -> None:
+    gateway = MockAWSGateway()
+    gateway.reset_desired_capacity(auto_scaling_group_name="my-asg", desired_capacity=3)
+    assert gateway.mutation_log == [
+        {"action": "reset_desired_capacity", "auto_scaling_group_name": "my-asg", "desired_capacity": 3}
+    ]
