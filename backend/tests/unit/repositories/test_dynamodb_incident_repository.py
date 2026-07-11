@@ -11,6 +11,7 @@ something closer to the real service.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from unittest.mock import MagicMock
 
 import boto3
 import pytest
@@ -123,3 +124,29 @@ def test_severity_none_is_stored_and_read_back_as_none(repository: DynamoDBIncid
     assert fetched is not None
     assert fetched.severity is None
     assert fetched.remediation_status == RemediationStatus.NOT_STARTED
+
+
+def test_list_all_paginates_across_multiple_scan_pages(repository: DynamoDBIncidentRepository) -> None:
+    """Real DynamoDB scans return at most 1MB per page and set
+    LastEvaluatedKey when there's more data to read; the follow-up scan
+    loop in list_all() was never exercised because every other test's
+    dataset fits in a single moto scan response. Mocking _table.scan
+    directly (rather than seeding thousands of rows into moto) forces a
+    second page deterministically.
+    """
+    incident_a = IncidentState(incident_id="incident-a", trigger_source=TriggerSource.MANUAL)
+    incident_b = IncidentState(incident_id="incident-b", trigger_source=TriggerSource.MANUAL)
+    item_a = DynamoDBIncidentRepository._to_item(incident_a)
+    item_b = DynamoDBIncidentRepository._to_item(incident_b)
+
+    page_one = {"Items": [item_a], "LastEvaluatedKey": {"incident_id": "incident-a"}}
+    page_two = {"Items": [item_b]}
+    mock_scan = MagicMock(side_effect=[page_one, page_two])
+    repository._table.scan = mock_scan
+
+    results = repository.list_all()
+
+    assert mock_scan.call_count == 2
+    mock_scan.assert_any_call()
+    mock_scan.assert_any_call(ExclusiveStartKey={"incident_id": "incident-a"})
+    assert {incident.incident_id for incident in results} == {"incident-a", "incident-b"}
