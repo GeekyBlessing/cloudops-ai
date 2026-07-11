@@ -1,0 +1,7 @@
+aws_region    = "us-east-1"
+# A git commit SHA that has actually been built and pushed by deploy.yml,
+# e.g. via `git rev-parse HEAD` on the commit you want running. Combined
+# with the ecr module's repository_url to form the full image URI --
+# see main.tf's `module "ecs"` block.
+image_tag     = "abc123f"
+desired_count = 1

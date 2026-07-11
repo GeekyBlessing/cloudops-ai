@@ -1,18 +1,15 @@
-# Dev environment: wires the networking, alb, dynamodb, ecr, iam, ecs,
-# monitoring, and frontend modules together into one deployable stack.
-# Always runs with CLOUDOPS_REMEDIATION_MODE=dry_run below -- see
-# environments/demo-live/main.tf for the one environment permitted to run
-# live (PROJECT_STRUCTURE.md). This directory, environments/staging, and
-# environments/demo-live are intentionally near-identical copies of the
-# same shape rather than one parameterized module -- see infra/README.md's
-# "Three environments" section for why remediation mode is hardcoded per
-# environment file instead of exposed as a shared variable.
+# Staging environment: identical shape to environments/dev, same
+# CLOUDOPS_REMEDIATION_MODE=dry_run default -- a separate name_prefix (and
+# therefore separate AWS resources and separate local Terraform state,
+# since this is a different directory) to test changes against before
+# they reach environments/demo-live. See infra/README.md's "Three
+# environments" section.
 
 locals {
-  name_prefix = "cloudops-ai-dev"
+  name_prefix = "cloudops-ai-staging"
   tags = {
     Project     = "cloudops-ai"
-    Environment = "dev"
+    Environment = "staging"
   }
 }
 

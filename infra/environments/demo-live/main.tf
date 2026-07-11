@@ -1,18 +1,16 @@
-# Dev environment: wires the networking, alb, dynamodb, ecr, iam, ecs,
-# monitoring, and frontend modules together into one deployable stack.
-# Always runs with CLOUDOPS_REMEDIATION_MODE=dry_run below -- see
-# environments/demo-live/main.tf for the one environment permitted to run
-# live (PROJECT_STRUCTURE.md). This directory, environments/staging, and
-# environments/demo-live are intentionally near-identical copies of the
-# same shape rather than one parameterized module -- see infra/README.md's
-# "Three environments" section for why remediation mode is hardcoded per
-# environment file instead of exposed as a shared variable.
+# Demo-live environment: identical shape to environments/dev and
+# environments/staging, except CLOUDOPS_REMEDIATION_MODE is hardcoded to
+# "live" below -- the only environment PROJECT_STRUCTURE.md ever permits
+# to run with live remediation enabled. Hardcoded directly in this file's
+# ecs module block, not exposed as a variable any environment could
+# accidentally be passed at apply time -- see infra/README.md's "Three
+# environments" section for the reasoning.
 
 locals {
-  name_prefix = "cloudops-ai-dev"
+  name_prefix = "cloudops-ai-demo-live"
   tags = {
     Project     = "cloudops-ai"
-    Environment = "dev"
+    Environment = "demo-live"
   }
 }
 
@@ -92,7 +90,7 @@ module "ecs" {
     # thing that's easy to typo or leave unset, so the infra-level default
     # matches the code-level fail-safe default rather than assuming
     # whoever deploys this will always remember to set it explicitly.
-    { name = "CLOUDOPS_REMEDIATION_MODE", value = "dry_run" },
+    { name = "CLOUDOPS_REMEDIATION_MODE", value = "live" },
     { name = "CLOUDOPS_LOG_LEVEL", value = "INFO" },
     { name = "CLOUDOPS_SQS_QUEUE_URL", value = module.eventbridge.queue_url },
   ]

@@ -81,10 +81,38 @@ correct, so this was built incrementally across several chunks:
   see that file's docstring for the full explanation. No Terraform changed
   for this fix, which is exactly the point: the infra was already correct,
   the backend's trust boundary around the LLM wasn't.
-- **staging/ and demo-live/ environments** -- only `environments/dev`
-  exists. `demo-live` in particular (the only environment meant to ever run
-  `CLOUDOPS_REMEDIATION_MODE=live`) is a real follow-up, not a rename of
-  `dev`.
+
+## Three environments
+
+`environments/dev`, `environments/staging`, and `environments/demo-live`
+are intentionally near-identical copies of the same `main.tf`/`variables.tf`/
+`outputs.tf` shape, not one parameterized module with a `terraform workspace`
+or an `environment` variable threaded through it. Each is its own directory
+with its own local Terraform state (see "One-time remote state bootstrap"
+below for the remote-state alternative), its own `name_prefix` (so the
+three never collide on AWS resource names), and its own hardcoded
+`CLOUDOPS_REMEDIATION_MODE` value in that file's `module.ecs.environment`
+block: `dry_run` for `dev` and `staging`, `live` only for `demo-live`.
+
+Hardcoding the remediation mode per-environment file, instead of exposing
+it as a shared variable every environment could accept, is deliberate.
+A variable can be overridden at apply time by anyone with a typo or a bad
+copy-paste (`-var="remediation_mode=live"` against `dev`, say); a value
+that's only ever written down inside `environments/demo-live/main.tf`
+cannot leak into another environment's apply without someone editing that
+other environment's file directly and it showing up as a real, reviewable
+diff. This mirrors the same reasoning behind `core/config.py`'s
+application-level default (`dry_run` unless explicitly overridden) and the
+HMAC-signed remediation approval flow -- the live-mutation path should
+never be the thing that "just happens" if a variable is left unset or
+mistyped.
+
+The practical cost of this approach is exactly what it looks like: a
+change to, say, `modules/ecs`'s `environment` block or a new module wired
+into `main.tf` has to be copied into all three files by hand rather than
+changed once. For a project at this stage, reviewable-by-diff safety for
+the one environment allowed to mutate real infrastructure was judged more
+important than avoiding that duplication.
 
 ## A note on verification
 
