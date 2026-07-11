@@ -78,51 +78,63 @@ resource "aws_subnet" "private" {
   })
 }
 
-# A single NAT gateway in one AZ, not one per AZ -- a real cost trade-off,
-# not an oversight: each NAT gateway costs ~$32/month plus per-GB data
-# processing, so two would roughly double that fixed cost. The trade-off
-# is that if this NAT gateway's AZ has an outage, the task in the *other*
-# AZ loses outbound internet access too (it still has a route to this NAT
-# gateway, just not a local one). For a single-task portfolio deployment
-# (environments/dev's desired_count defaults to 1) that asymmetric
-# resilience gap matters far less than it would in production -- tracked
-# as a real follow-up in infra/README.md, not silently accepted.
+# One NAT gateway per AZ, not a single shared one -- this used to be a
+# single NAT gateway in aws_subnet.public[0], documented as a deliberate
+# cost trade-off (see infra/README.md's former "Single NAT gateway"
+# deferred bullet). That trade-off meant an outage in the NAT gateway's
+# own AZ took out outbound internet access for the private-subnet task in
+# the *other* AZ too, even though that AZ was otherwise healthy -- a real
+# gap once anything besides a single-task portfolio deployment is at
+# stake. Fixed here at roughly double the fixed monthly NAT cost (~$32/mo
+# per additional gateway, plus per-GB data processing) by giving every AZ
+# its own NAT gateway and its own private route table, so a private
+# subnet only ever depends on infrastructure in its own AZ.
 resource "aws_eip" "nat" {
+  count  = length(var.private_subnet_cidrs)
   domain = "vpc"
 
   tags = merge(var.tags, {
-    Name = "${var.name_prefix}-nat-eip"
+    Name = "${var.name_prefix}-nat-eip-${count.index}"
   })
 
   depends_on = [aws_internet_gateway.this]
 }
 
 resource "aws_nat_gateway" "this" {
-  allocation_id = aws_eip.nat.id
-  subnet_id     = aws_subnet.public[0].id
+  count         = length(var.private_subnet_cidrs)
+  allocation_id = aws_eip.nat[count.index].id
+  # Indexed the same as aws_subnet.private -- this NAT gateway lives in
+  # the public subnet in the *same* AZ as the private subnet it serves,
+  # which is what makes each private subnet independent of every other
+  # AZ's NAT gateway. Assumes var.public_subnet_cidrs and
+  # var.private_subnet_cidrs are the same length, one entry per AZ used
+  # -- already an implicit assumption elsewhere in this file (the public
+  # and private route table associations both index by count.index too).
+  subnet_id = aws_subnet.public[count.index].id
 
   tags = merge(var.tags, {
-    Name = "${var.name_prefix}-nat"
+    Name = "${var.name_prefix}-nat-${count.index}"
   })
 
   depends_on = [aws_internet_gateway.this]
 }
 
 resource "aws_route_table" "private" {
+  count  = length(var.private_subnet_cidrs)
   vpc_id = aws_vpc.this.id
 
   route {
     cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = aws_nat_gateway.this.id
+    nat_gateway_id = aws_nat_gateway.this[count.index].id
   }
 
   tags = merge(var.tags, {
-    Name = "${var.name_prefix}-private-rt"
+    Name = "${var.name_prefix}-private-rt-${count.index}"
   })
 }
 
 resource "aws_route_table_association" "private" {
   count          = length(aws_subnet.private)
   subnet_id      = aws_subnet.private[count.index].id
-  route_table_id = aws_route_table.private.id
+  route_table_id = aws_route_table.private[count.index].id
 }

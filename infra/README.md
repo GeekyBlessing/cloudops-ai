@@ -56,13 +56,12 @@ correct, so this was built incrementally across several chunks:
   an ACM cert with DNS validation, and adding an HTTPS listener (with the
   HTTP one either removed or redirecting to it) -- a real chunk of its
   own, not a config flag.
-- **Single NAT gateway, not one per AZ.** `modules/networking` creates one
-  NAT gateway in one AZ to halve the fixed monthly cost -- see that
-  module's `aws_nat_gateway` resource comment for the full trade-off. If
-  that AZ has an outage, the private-subnet task in the *other* AZ loses
-  outbound internet access too, even though it's otherwise healthy. Low
-  stakes for a single-task portfolio deployment, a real gap for anything
-  meant to survive an AZ failure.
+- ~~Single NAT gateway, not one per AZ~~ -- **fixed**. `modules/networking`
+  now creates one NAT gateway and one private route table per AZ, so a
+  private subnet only ever depends on infrastructure in its own AZ --
+  see that module's `aws_nat_gateway` resource comment for the cost
+  trade-off (roughly double the fixed monthly NAT cost, ~$32/mo per
+  additional gateway).
 - ~~Alarm-to-incident-pipeline feedback loop~~ -- **correction, not a
   build**: this bullet previously claimed `modules/monitoring`'s alarms
   "are not wired into" `modules/eventbridge`'s CloudWatch-Alarm-state-change
