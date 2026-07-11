@@ -119,3 +119,9 @@ module "monitoring" {
   alert_email      = var.alert_email
   tags             = local.tags
 }
+module "frontend" {
+  source       = "../../modules/frontend"
+  name_prefix  = local.name_prefix
+  alb_dns_name = module.alb.alb_dns_name
+  tags         = local.tags
+}

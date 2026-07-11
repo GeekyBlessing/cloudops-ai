@@ -63,12 +63,6 @@ correct, so this was built incrementally across several chunks:
   outbound internet access too, even though it's otherwise healthy. Low
   stakes for a single-task portfolio deployment, a real gap for anything
   meant to survive an AZ failure.
-- **Frontend S3+CloudFront module** -- not started. The frontend Docker
-  image (`frontend/Dockerfile`, nginx-based) exists but has no ECR
-  repository or hosting target in Terraform yet -- `deploy.yml` only
-  builds/pushes the backend image. Add a second `aws_ecr_repository` in
-  `modules/ecr` and a real hosting target when this gets built, rather
-  than provisioning storage for an image nothing deploys.
 - ~~Alarm-to-incident-pipeline feedback loop~~ -- **correction, not a
   build**: this bullet previously claimed `modules/monitoring`'s alarms
   "are not wired into" `modules/eventbridge`'s CloudWatch-Alarm-state-change
@@ -228,8 +222,8 @@ needed (none of this is automatable from within the workflow file itself
    `ecr:CompleteLayerUpload` (to push images), plus everything
    `terraform apply` needs to create/update the resources in
    `modules/networking`, `modules/alb`, `modules/dynamodb`, `modules/iam`,
-   `modules/ecs`, `modules/ecr`, `modules/eventbridge`, and
-   `modules/monitoring` themselves (`dynamodb:*`,
+   `modules/ecs`, `modules/ecr`, `modules/eventbridge`,
+   `modules/monitoring`, and `modules/frontend` themselves (`dynamodb:*`,
    `iam:CreateRole`/`PutRolePolicy`/etc., `ecs:*`,
    `ecr:CreateRepository`/`PutLifecyclePolicy`/etc., `events:*`, `sqs:*`,
    `logs:*`, `cloudwatch:PutMetricAlarm`/`DeleteAlarms`/`PutDashboard`/
@@ -240,9 +234,74 @@ needed (none of this is automatable from within the workflow file itself
    `ec2:*NatGateway*`/`ec2:AllocateAddress`/`ec2:ReleaseAddress`/
    `ec2:DescribeAddresses`/`ec2:CreateTags`/`ec2:Describe*` now that
    `modules/networking` creates and owns VPC, subnet, and NAT gateway
-   resources instead of just reading the default VPC). This is a
-   deliberate, reviewed grant appropriate for a role that only a
-   human-triggered, environment-gated workflow can assume -- not a rubber
-   stamp.
+   resources instead of just reading the default VPC), and, now that
+   `modules/frontend` exists, `s3:CreateBucket`/`s3:DeleteBucket`/
+   `s3:PutBucketPolicy`/`s3:GetBucketPolicy`/`s3:DeleteBucketPolicy`/
+   `s3:PutBucketPublicAccessBlock`/`s3:GetBucketPublicAccessBlock`/
+   `s3:PutBucketOwnershipControls`/`s3:GetBucketOwnershipControls`/
+   `s3:GetBucketTagging`/`s3:PutBucketTagging`/`s3:GetBucketLocation`
+   (the frontend bucket itself) plus `cloudfront:CreateDistribution`/
+   `cloudfront:GetDistribution`/`cloudfront:UpdateDistribution`/
+   `cloudfront:DeleteDistribution`/`cloudfront:TagResource`/
+   `cloudfront:ListTagsForResource`/`cloudfront:CreateOriginAccessControl`/
+   `cloudfront:GetOriginAccessControl`/`cloudfront:UpdateOriginAccessControl`/
+   `cloudfront:DeleteOriginAccessControl`/`cloudfront:CreateFunction`/
+   `cloudfront:UpdateFunction`/`cloudfront:PublishFunction`/
+   `cloudfront:GetFunction`/`cloudfront:DescribeFunction`/
+   `cloudfront:DeleteFunction` (the distribution, OAC, and SPA-fallback
+   function). This is a deliberate, reviewed grant appropriate for a role
+   that only a human-triggered, environment-gated workflow can assume --
+   not a rubber stamp.
+4. **Two more permissions the deploy job itself calls directly, outside
+   `terraform apply`** -- syncing the built dashboard into the frontend
+   bucket and busting the CloudFront cache so the new build is actually
+   served: `s3:PutObject`/`s3:DeleteObject`/`s3:ListBucket` on the
+   frontend bucket (`aws s3 sync`), and `cloudfront:CreateInvalidation`
+   on the distribution (`aws cloudfront create-invalidation`). Scope both
+   to the specific bucket/distribution ARNs from
+   `terraform output frontend_bucket_arn` /
+   `terraform output frontend_cloudfront_distribution_arn` rather than
+   `*`, once the role's policy is set up by hand -- broad `s3:*`/
+   `cloudfront:*` isn't needed for what this workflow actually does after
+   the resources exist.
+
+## Frontend hosting
+
+`modules/frontend` puts the built React dashboard in a private S3 bucket
+and serves it through a single CloudFront distribution with two origins:
+S3 for the dashboard's static files (the default behavior), and the ALB
+for every real backend route (`/health`, `/incidents*`, `/remediation*` --
+see that module's `api_path_patterns` variable) as ordered behaviors with
+caching disabled.
+
+The reason for one distribution instead of two separate things (a static
+site plus a directly-called ALB) is TLS: CloudFront terminates HTTPS with
+its own default `*.cloudfront.net` certificate, but the ALB only has an
+HTTP:80 listener (see "TLS/HTTPS and a custom domain" above). If the
+dashboard, served over HTTPS, called the ALB directly over HTTP, the
+browser would block every API request as mixed content -- the page would
+load but nothing in it would work. Routing `/health`, `/incidents*`, and
+`/remediation*` through CloudFront too means the browser only ever talks
+to CloudFront over HTTPS; the one remaining plaintext hop is
+CloudFront-to-ALB, inside AWS's network, not the public internet.
+
+SPA client-side routing (`/incidents/abc123` on a page reload, which
+doesn't correspond to a real S3 object) is handled by a CloudFront
+Function attached only to the S3 behavior, not a distribution-wide
+`custom_error_response`. `custom_error_response` is keyed by HTTP status
+code across the *entire* distribution -- a real 404 from the backend
+(an incident that doesn't exist) would also get silently rewritten to
+`index.html`, turning a correct API error into a 200 response containing
+the SPA shell. Scoping the rewrite to a function on one behavior avoids
+that failure mode entirely.
+
+`deploy.yml` builds the dashboard with `VITE_API_BASE_URL=""` (empty
+string, not unset -- see `frontend/src/api/client.ts`'s
+`?? "http://localhost:8000"` fallback, which only triggers on
+null/undefined). An empty base URL makes every API call relative to
+whatever origin serves the page, which is exactly right now that the
+dashboard and the API live behind the same CloudFront domain -- no need
+to bake a specific URL into the build, and no CORS configuration needed
+anywhere.
 
 ## Structure

@@ -79,11 +79,10 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # Backend only -- there's no ECS service or S3+CloudFront
-      # distribution for the frontend yet (see infra/README.md's
-      # "Explicitly deferred" section), so building/pushing a frontend
-      # image here would just be storage nothing deploys. Add a second
-      # build-push step once frontend hosting is actually built.
+      # Backend image only here -- the frontend is a static build (dist/),
+      # not a container, so it never goes through ECR/build-push-action.
+      # It's built a few steps down and synced straight to S3 once
+      # module.frontend's bucket exists.
       #
       # Tagged with the exact commit SHA that triggered this workflow --
       # never "latest". Combined with the ecr module's IMMUTABLE tag
@@ -96,10 +95,49 @@ jobs:
           push: true
           tags: ${{ steps.ecr-repo.outputs.url }}:${{ github.sha }}
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      # VITE_API_BASE_URL="" (empty string, not unset) deliberately -- see
+      # frontend/src/api/client.ts's `?? "http://localhost:8000"` fallback.
+      # `??` only falls back on null/undefined, not on an empty string, so
+      # this makes every API call relative to whatever origin serves the
+      # dashboard. That's exactly what's wanted now that CloudFront proxies
+      # /health, /incidents*, and /remediation* to the ALB from the same
+      # distribution that serves the dashboard itself (see
+      # infra/modules/frontend/main.tf) -- same origin, no CORS, and no
+      # need to know the CloudFront domain name at build time.
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+        env:
+          VITE_API_BASE_URL: ""
+
       - name: Terraform apply
         run: terraform apply -auto-approve -var="image_tag=${{ github.sha }}"
+
+      # frontend_bucket_name/frontend_cloudfront_distribution_id only
+      # exist after the apply above -- module.frontend's S3 bucket and
+      # CloudFront distribution are created by that same step, not a
+      # separate targeted bootstrap apply like ECR's, since there's no
+      # chicken-and-egg problem here: the frontend build above doesn't
+      # depend on anything Terraform creates.
+      - name: Sync frontend build to S3
+        run: aws s3 sync ../../../frontend/dist "s3://$(terraform output -raw frontend_bucket_name)" --delete
+
+      - name: Invalidate CloudFront cache
+        run: aws cloudfront create-invalidation --distribution-id "$(terraform output -raw frontend_cloudfront_distribution_id)" --paths "/*"
 
       - name: Summary
         run: |
           echo "Deployed ${{ steps.ecr-repo.outputs.url }}:${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
           echo "ECS service: $(terraform output -raw ecs_service_name)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Dashboard: https://$(terraform output -raw cloudfront_domain_name)" >> "$GITHUB_STEP_SUMMARY"

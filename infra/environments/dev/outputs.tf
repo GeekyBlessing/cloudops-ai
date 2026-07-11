@@ -42,3 +42,27 @@ output "monitoring_dashboard_url" {
 output "monitoring_sns_topic_arn" {
   value = module.monitoring.sns_topic_arn
 }
+output "cloudfront_domain_name" {
+  description = "Single HTTPS URL the dashboard is reachable at (SPA + API, both proxied through this one CloudFront distribution)."
+  value       = module.frontend.cloudfront_domain_name
+}
+
+output "frontend_bucket_name" {
+  description = "S3 bucket holding the built dashboard. Used by deploy.yml's `aws s3 sync` step."
+  value       = module.frontend.bucket_name
+}
+
+output "frontend_bucket_arn" {
+  description = "S3 bucket ARN. Used to scope the CI deploy role's S3 permissions."
+  value       = module.frontend.bucket_arn
+}
+
+output "frontend_cloudfront_distribution_id" {
+  description = "CloudFront distribution ID. Used by deploy.yml's cache-invalidation step."
+  value       = module.frontend.cloudfront_distribution_id
+}
+
+output "frontend_cloudfront_distribution_arn" {
+  description = "CloudFront distribution ARN. Used to scope the CI deploy role's cloudfront:CreateInvalidation permission."
+  value       = module.frontend.cloudfront_distribution_arn
+}
