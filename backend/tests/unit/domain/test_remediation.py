@@ -79,3 +79,15 @@ def test_plan_requires_at_least_one_action(approval_secret_key: bytes) -> None:
 def test_plan_not_requiring_approval_can_execute_without_a_token(approval_secret_key: bytes) -> None:
     plan = _make_plan(approval_secret_key, requires_approval=False)
     assert plan.can_execute_live(approval_secret_key) is True
+
+
+def test_plan_approved_but_missing_approval_token_cannot_execute_live(approval_secret_key: bytes) -> None:
+    """status can reach APPROVED without an approval object ever being
+    attached (e.g. a data/migration bug, or a caller that sets status
+    directly instead of going through the approval service) --
+    can_execute_live must still fail closed rather than assume APPROVED
+    implies a token is present.
+    """
+    plan = _make_plan(approval_secret_key, status=RemediationStatus.APPROVED)
+    assert plan.approval is None
+    assert plan.can_execute_live(approval_secret_key) is False
