@@ -1,39 +1,59 @@
 # CloudOps AI — Backend
 
-Agentic AI Cloud Engineer: a LangGraph multi-agent system, exposed over FastAPI,
-that monitors AWS infrastructure, diagnoses incidents, and remediates them under
-a human-gated approval workflow. See `/docs/ARCHITECTURE.md` at the repo root
-for the full system design and rationale.
+FastAPI + LangGraph backend for CloudOps AI. For the full system overview, architecture diagrams, and AWS service reference, see the [root README](../README.md) and [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md).
 
-## Current state (build-in-progress)
+## Stack
 
-- [x] **Domain layer** (`src/cloudops_ai/domain/`) — framework-free models and
-      enums: `IncidentState`, `RemediationPlan`, `Evidence`, `AgentStep`,
-      `IncidentReport`, `ResourceRef`, and the remediation policy allow-list.
-- [x] **AWS tool interfaces + mock/dry-run adapters** (`tools/`, `adapters/mock/`)
-- [ ] LangGraph skeleton (Coordinator + Monitoring agents)
-- [ ] FastAPI shell + `/incidents` router
-- [ ] DynamoDB repositories
-- [ ] Remaining specialist agents
-- [ ] Remaining incident types
+- Python 3.12+, managed with [`uv`](https://github.com/astral-sh/uv)
+- FastAPI, Pydantic v2, pydantic-settings
+- LangGraph + LangChain for the multi-agent incident graph
+- boto3 for AWS access, `moto` for mocked AWS in tests
+- DynamoDB for persistence (DynamoDB Local in dev via docker-compose)
+- `structlog` for logging
 
-## Getting started
-
-This project uses [`uv`](https://docs.astral.sh/uv/) for dependency management.
+## Setup
 
 ```bash
+cd backend
 uv sync --all-extras
-uv run pytest
-uv run ruff check .
-uv run mypy src
 ```
 
-## Design invariants worth knowing before you touch this code
+## Running locally
 
-1. `domain/` never imports `boto3`, `langgraph`, or `fastapi`.
-2. Evidence and audit trail fields are append-only — always call
-   `IncidentState.add_evidence(...)` / `.add_agent_step(...)`.
-3. A `RemediationPlan` can only execute live with a verified `ApprovalToken` —
-   see `RemediationPlan.can_execute_live()` and `tests/unit/domain/test_remediation.py`.
-4. The remediation policy table fails closed — any `(incident_type, severity)`
-   pair not explicitly listed is denied.
+Bring up the full stack (backend + frontend + DynamoDB Local) from the repo root:
+
+```bash
+docker-compose up
+```
+
+Or run just the backend against DynamoDB Local / the mock adapter — see `.env.example` for the relevant `CLOUDOPS_*` variables (`CLOUDOPS_USE_DYNAMODB`, `CLOUDOPS_DYNAMODB_ENDPOINT_URL`, `CLOUDOPS_USE_REAL_AWS`, `CLOUDOPS_REMEDIATION_MODE`, etc.).
+
+```bash
+uv run uvicorn cloudops_ai.main:app --reload
+```
+
+## Testing
+
+```bash
+uv run pytest --cov=src/cloudops_ai --cov-report=term-missing
+```
+
+Backend statement coverage currently sits at 99% (1,221 statements, 3 remaining, both in files already at their practical testing ceiling). Unit tests never touch real AWS — they run against `adapters/mock/mock_aws_gateway.py` or `moto`.
+
+## Linting and type-checking
+
+```bash
+uv run ruff check .
+uv run mypy .
+```
+
+`mypy` runs in `strict` mode across the package.
+
+## Structure
+
+See [Folder Structure](../README.md#folder-structure) in the root README, and [Backend Module Map](../docs/ARCHITECTURE.md#backend-module-map) in the architecture doc for a directory-by-directory breakdown.
+
+## Security-relevant conventions
+
+- AWS-touching code is split into read-only and mutating tool interfaces (`tools/interfaces.py`) — see [Security Model](../README.md#security-model) and [SECURITY.md](../SECURITY.md).
+- New remediation actions must be added to both the policy allow-list (`domain/policies/remediation_policy.py`) and the executor's action mapping (`agents/remediation_executor.py`), or they're unreachable by design.

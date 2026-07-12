@@ -1,41 +1,41 @@
-# CloudOps AI -- Dashboard
+# CloudOps AI — Dashboard
 
-React + TypeScript frontend for CloudOps AI. Talks to the FastAPI backend
-in `../backend` over plain `fetch` calls -- see `src/api/client.ts` for the
-full list of endpoints it uses.
+React + TypeScript dashboard for CloudOps AI. For the full system overview, see the [root README](../README.md).
+
+## Stack
+
+- React 18.3, TypeScript 5.5, Vite 5.4
+- React Router for navigation
+- A small typed REST client (`src/api/client.ts`) — no state-management library; the two pages here don't need one
 
 ## Setup
 
 ```bash
+cd frontend
 npm install
-cp .env.example .env.local   # adjust VITE_API_BASE_URL if needed
 npm run dev
 ```
 
-Opens on http://localhost:5173. Make sure the backend is running first
-(`uv run uvicorn cloudops_ai.main:app --reload` from `../backend`) --
-without it, the incident list will show a fetch error, which is expected
-and not a frontend bug.
+## Authentication
 
-## Scripts
+The dashboard requires a `CLOUDOPS_API_KEY` to talk to the backend. Requests are gated through `src/api/apiKey.ts` / `src/components/ApiKeyControl`; without a valid key, requests fail and the UI surfaces the error state rather than silently showing empty data. This is intentionally simple — see [Known Limitations](../SECURITY.md#known-limitations) for what it doesn't cover (no per-user identity, no key rotation without a redeploy).
 
-- `npm run dev` -- Vite dev server with hot reload
-- `npm run typecheck` -- `tsc --noEmit`, no build output
-- `npm run build` -- type-checks then produces a production build in `dist/`
-- `npm run preview` -- serves the production build locally
+## Pages
 
-## Structure
+- **Incident list** (`pages/IncidentListPage.tsx`) — all incidents with status, loading/error/empty states.
+- **Incident detail** (`pages/IncidentDetailPage.tsx`) — a single incident's agent trace and evidence.
 
-- `src/types/domain.ts` -- hand-kept-in-sync mirror of the backend's Pydantic models
-- `src/api/client.ts` -- the only file that knows the backend's URL/shapes
-- `src/components/` -- small, reusable presentational pieces (StatusBadge, EvidenceList, AgentTraceList)
-- `src/pages/` -- route-level components (IncidentListPage, IncidentDetailPage)
+There are currently only these two pages. Anything beyond this (a resources view, cost dashboard, live agent feed, etc.) is aspirational and not yet built — see the [Roadmap](../README.md#roadmap) in the root README.
 
-## Known limitations (by design, for this build stage)
+## Building
 
-- No auth -- `CLOUDOPS_API_KEY` exists on the backend but isn't wired into
-  any request here yet.
-- No polling/websockets -- the detail page only refreshes on load or when
-  you click Refresh/Approve/Reject.
-- `IncidentReport` is typed but always `null` today -- report generation
-  isn't implemented in the backend yet.
+```bash
+npm run build   # runs tsc, then vite build
+npm run lint
+```
+
+## Running against the full stack
+
+```bash
+docker-compose up   # from the repo root — backend + frontend + DynamoDB Local
+```
