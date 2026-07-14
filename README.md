@@ -22,10 +22,6 @@
 
 ---
 
-> 📸 **Screenshot placeholder** — incident list dashboard (`frontend/src/pages/IncidentListPage.tsx`). Replace this block with a real screenshot once deployed.
->
-> 🎬 **GIF placeholder** — a full incident lifecycle: alarm fires → agents investigate → plan proposed → human approves → remediation executes → status flips to `VERIFIED`. This is the single most effective demo of the project; record it against the `demo-live` environment.
-
 ---
 
 ## Table of Contents
