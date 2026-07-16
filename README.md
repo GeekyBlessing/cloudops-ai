@@ -51,7 +51,7 @@
 
 ## What This Is
 
-CloudOps AI is a portfolio project built to answer one question honestly: **can an AI agent be trusted anywhere near a real AWS account?** Not "can it write a summary of an alarm" — can it detect a problem, investigate it the way an engineer would, decide on a fix, and be *physically incapable* of applying that fix without a human saying yes.
+CloudOps AI is a portfolio project built to answer one question honestly: **can an AI agent be trusted anywhere near a real AWS account?** Not "can it write a summary of an alarm" can it detect a problem, investigate it the way an engineer would, decide on a fix, and be *physically incapable* of applying that fix without a human saying yes.
 
 The system is a **LangGraph multi-agent graph** exposed over a **FastAPI** backend, with a **React + TypeScript** dashboard for humans to review incidents and approve or reject remediation. It runs on **ECS Fargate**, behind an **Application Load Balancer** and **CloudFront**, provisioned entirely by **Terraform** across three environments, deployed by **GitHub Actions** using OIDC (no long-lived AWS keys anywhere).
 
@@ -115,13 +115,13 @@ flowchart TB
 **Why this shape, specifically:**
 
 - **No separate trigger Lambda.** An earlier design considered a thin Lambda between EventBridge and SQS. What's actually built is simpler: EventBridge writes straight to SQS, and the same ECS task that serves the API runs an in-process background poller (`services/sqs_incident_poller.py`, started from `main.py`'s ASGI lifespan hook) that consumes it. One fewer moving part, one fewer IAM role, no cold-start latency to reason about appropriate at this project's scale.
-- **CloudFront in front of both the static dashboard and the API**, not two separate endpoints. The ALB only has an HTTP:80 listener — no ACM certificate exists yet (see [Known Limitations](#known-limitations)). If the CloudFront-served (HTTPS) dashboard called that ALB directly, browsers would block every request as mixed content. Routing `/health`, `/incidents*`, and `/remediation*` through CloudFront too means the browser only ever speaks HTTPS to CloudFront; the one remaining plaintext hop is CloudFront→ALB, inside AWS's network, never the public internet.
+- **CloudFront in front of both the static dashboard and the API**, not two separate endpoints. The ALB only has an HTTP:80 listener,no ACM certificate exists yet (see [Known Limitations](#known-limitations)). If the CloudFront-served (HTTPS) dashboard called that ALB directly, browsers would block every request as mixed content. Routing `/health`, `/incidents*`, and `/remediation*` through CloudFront too means the browser only ever speaks HTTPS to CloudFront; the one remaining plaintext hop is CloudFront→ALB, inside AWS's network, never the public internet.
 - **DynamoDB as the single incident store**, accessed through a repository interface (`repositories/interfaces.py`) with two implementations a real `DynamoDBIncidentRepository` and an `InMemoryIncidentRepository` for tests — so the domain and agent logic never know or care which one is backing them.
 - **ECS Fargate, not Lambda, for the agent runtime.** LangGraph runs can be multi-step and long-lived (waiting on a human approval mid-graph); a persistent container fits that model better than a function with a execution time limit.
 
 ## AI Agent Workflow
 
-CloudOps AI's core loop is a **LangGraph `StateGraph`** (`agents/graph.py`) where every node reads and writes one shared, typed `IncidentState` (a Pydantic model, not a loose dict). Agents append to `evidence` and `agent_trace` rather than overwrite them — the final incident record is a faithful reconstruction of what happened, not a summary that hides it.
+CloudOps AI's core loop is a **LangGraph `StateGraph`** (`agents/graph.py`) where every node reads and writes one shared, typed `IncidentState` (a Pydantic model, not a loose dict). Agents append to `evidence` and `agent_trace` rather than overwrite them the final incident record is a faithful reconstruction of what happened, not a summary that hides it.
 
 ```mermaid
 flowchart TB
