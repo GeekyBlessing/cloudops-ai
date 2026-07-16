@@ -65,7 +65,7 @@ Three ideas run through every decision in this repo:
 
 **Read and mutate are different type-level capabilities, not just different IAM policies.** `tools/interfaces.py` defines `IReadOnlyAWSTools` and `IMutatingAWSTools` as separate Protocols. Every investigative agent (Monitoring, Security, Cost, Troubleshooting, Infrastructure) is only ever handed a read-only tool set,it is not possible for those agents to call a mutating method, because that method doesn't exist on the object they were given. Exactly one node in the entire graph, the Remediation Executor, is ever constructed with `IMutatingAWSTools`. This is enforced by the Python type system, not by convention.
 
-**Safety is fail-closed by construction, not by configuration.** `RemediationPlan.can_execute_live()` requires a valid, HMAC-signed `ApprovalToken` bound to that exact plan's ID a forged or mismatched signature is rejected, and so is a plan whose status was somehow set to `APPROVED` without a token ever being attached (see `tests/unit/domain/test_remediation.py`). The remediation-mode default (`dry_run`) is hardcoded per Terraform environment file rather than exposed as a shared variable, specifically so it can't be flipped to `live` by a mistyped `-var` flag — changing it requires an actual reviewable diff.
+**Safety is fail-closed by construction, not by configuration.** `RemediationPlan.can_execute_live()` requires a valid, HMAC-signed `ApprovalToken` bound to that exact plan's ID a forged or mismatched signature is rejected, and so is a plan whose status was somehow set to `APPROVED` without a token ever being attached (see `tests/unit/domain/test_remediation.py`). The remediation-mode default (`dry_run`) is hardcoded per Terraform environment file rather than exposed as a shared variable, specifically so it can't be flipped to `live` by a mistyped `-var` flag changing it requires an actual reviewable diff.
 
 ## Architecture
 
@@ -116,7 +116,7 @@ flowchart TB
 
 - **No separate trigger Lambda.** An earlier design considered a thin Lambda between EventBridge and SQS. What's actually built is simpler: EventBridge writes straight to SQS, and the same ECS task that serves the API runs an in-process background poller (`services/sqs_incident_poller.py`, started from `main.py`'s ASGI lifespan hook) that consumes it. One fewer moving part, one fewer IAM role, no cold-start latency to reason about appropriate at this project's scale.
 - **CloudFront in front of both the static dashboard and the API**, not two separate endpoints. The ALB only has an HTTP:80 listener,no ACM certificate exists yet (see [Known Limitations](#known-limitations)). If the CloudFront-served (HTTPS) dashboard called that ALB directly, browsers would block every request as mixed content. Routing `/health`, `/incidents*`, and `/remediation*` through CloudFront too means the browser only ever speaks HTTPS to CloudFront; the one remaining plaintext hop is CloudFront→ALB, inside AWS's network, never the public internet.
-- **DynamoDB as the single incident store**, accessed through a repository interface (`repositories/interfaces.py`) with two implementations a real `DynamoDBIncidentRepository` and an `InMemoryIncidentRepository` for tests — so the domain and agent logic never know or care which one is backing them.
+- **DynamoDB as the single incident store**, accessed through a repository interface (`repositories/interfaces.py`) with two implementations a real `DynamoDBIncidentRepository` and an `InMemoryIncidentRepository` for tests so the domain and agent logic never know or care which one is backing them.
 - **ECS Fargate, not Lambda, for the agent runtime.** LangGraph runs can be multi-step and long-lived (waiting on a human approval mid-graph); a persistent container fits that model better than a function with a execution time limit.
 
 ## AI Agent Workflow
@@ -169,13 +169,13 @@ flowchart TB
 | **Coordinator** (`coordinator.py`) | What kind of incident is this, which specialists are relevant, and what's the final remediation call? | No |
 | **Monitoring** (`monitoring_agent.py`) | What do the CloudWatch metrics say — is this an anomaly or normal noise? | No |
 | **Troubleshooting** (`troubleshooting_agent.py`) | What sequence of events actually caused this? | No |
-| **Security** (`security_agent.py`) | Is there an active security exposure (public bucket, over-permissive IAM, GuardDuty finding)? | No — flags only |
+| **Security** (`security_agent.py`) | Is there an active security exposure (public bucket, over-permissive IAM, GuardDuty finding)? | No flags only |
 | **Cost** (`cost_agent.py`) | Is this resource idle or oversized? | No |
 | **Infrastructure** (`infrastructure_agent.py`) | What does the resource actually look like right now? | No |
 | **Deployment** (`deployment_agent.py`) | Is this a bad deploy, and is a rollback the right call? | No |
 | **Remediation Executor** (`remediation_executor.py`) | Execute the approved plan and report success or failure | **Yes — the only one** |
 
-A deterministic short-circuit in `classify_node` recognizes this project's *own* monitoring alarms (ECS CPU/memory, SQS DLQ depth, poller staleness) by name convention and classifies them as `PLATFORM_HEALTH_ALARM` before any LLM call — this exists because `infra/modules/eventbridge`'s alarm rule is intentionally unscoped (it has to catch any CloudWatch alarm, including the platform's own), and asking an LLM to force-fit a platform alarm into a customer-resource incident type (e.g., guessing an ECS CPU alarm is `EC2_HIGH_CPU`) produced a plausible-looking but wrong investigation. See `coordinator.py`'s docstring for the full story — this was a real bug found and fixed during development, not a hypothetical.
+A deterministic short-circuit in `classify_node` recognizes this project's *own* monitoring alarms (ECS CPU/memory, SQS DLQ depth, poller staleness) by name convention and classifies them as `PLATFORM_HEALTH_ALARM` before any LLM call this exists because `infra/modules/eventbridge`'s alarm rule is intentionally unscoped (it has to catch any CloudWatch alarm, including the platform's own), and asking an LLM to force-fit a platform alarm into a customer-resource incident type (e.g., guessing an ECS CPU alarm is `EC2_HIGH_CPU`) produced a plausible-looking but wrong investigation. See `coordinator.py`'s docstring for the full story — this was a real bug found and fixed during development, not a hypothetical.
 
 ## AWS Services Used
 
@@ -192,16 +192,16 @@ A deterministic short-circuit in `classify_node` recognizes this project's *own*
 | **CloudTrail** | Read-only event lookup for the Troubleshooting Agent's root-cause analysis, and the independent, tamper-evident record of what the Remediation Executor's role actually did. |
 | **GuardDuty** | Findings feed into incident triage via the SQS poller and the Security Agent. |
 | **IAM** | Least-privilege roles scoped to the *exact* boto3 calls each tool gateway makes (`MonitoringReadOnlyRole`, `RemediationExecutorRole`), not broad service-level access. OIDC federation for GitHub Actions — no long-lived AWS access keys stored anywhere. |
-| **ECR** | Backend Docker image repository — immutable tags, scan-on-push, lifecycle policy for untagged images. |
+| **ECR** | Backend Docker image repository immutable tags, scan-on-push, lifecycle policy for untagged images. |
 | **SNS** | Ops-alert delivery for the platform's own CloudWatch alarms. |
-| **VPC** | Custom networking (not the default VPC) — public subnets for the ALB, private subnets for ECS, one NAT gateway *per Availability Zone* so a private subnet's egress only ever depends on its own AZ's infrastructure. |
+| **VPC** | Custom networking (not the default VPC) - public subnets for the ALB, private subnets for ECS, one NAT gateway *per Availability Zone* so a private subnet's egress only ever depends on its own AZ's infrastructure. |
 
 ## Security Model
 
 This is the section a security-focused reviewer should read first.
 
 - **Type-level separation of read and mutate.** `IReadOnlyAWSTools` and `IMutatingAWSTools` are separate Protocols (`tools/interfaces.py`). Six of the eight nodes in the graph are only ever constructed with a read-only tool set — calling a mutating method on them isn't a permissions error, it's a `AttributeError` at the type level, because the method doesn't exist on the object.
-- **A single, small, heavily-tested mutation gateway.** `remediation_executor.py` is the only place `IMutatingAWSTools` is ever invoked. It's ~50 statements, 100% test-covered, and every action it can take is looked up from a fixed `_ACTION_INVOKERS` mapping — an action name with no entry raises and fails the plan closed rather than doing something undefined.
+- **A single, small, heavily-tested mutation gateway.** `remediation_executor.py` is the only place `IMutatingAWSTools` is ever invoked. It's ~50 statements, 100% test-covered, and every action it can take is looked up from a fixed `_ACTION_INVOKERS` mapping - an action name with no entry raises and fails the plan closed rather than doing something undefined.
 - **HMAC-signed approval tokens, not a status flag.** `ApprovalToken.sign()`/`.verify()` (`domain/models/remediation.py`) uses `hmac.compare_digest` (constant-time comparison, avoiding a timing side-channel) and binds the signature to a specific `plan_id`an approval for one plan cannot be replayed against another. A `model_validator` rejects constructing a `RemediationPlan` whose attached approval's `plan_id` doesn't match at all, as a second, independent guard.
 - **Fails closed, everywhere.** `RemediationPlan.can_execute_live()` returns `False` for: a plan that doesn't require approval and isn't in scope for live execution's default; a plan not in `APPROVED` status; a plan with no approval attached at all, even if status somehow reached `APPROVED`; and a plan whose approval fails HMAC verification. Every one of these branches has an explicit test (`tests/unit/domain/test_remediation.py`).
 - **A deterministic, fail-closed action allow-list.** `domain/policies/remediation_policy.py` maps `(incident_type, severity) → allowed_actions`. Any pair not explicitly listed gets no proposed remediation at all — a report-only recommendation, never a guess.
@@ -263,10 +263,10 @@ Full rationale for every module, IAM permission list, and manual deployment step
 
 Four GitHub Actions workflows (`.github/workflows/`):
 
-- **`backend-ci.yml`** — `ruff check` (lint) → `mypy --strict` (type-check) → `pytest` with coverage, on every push/PR touching `backend/`.
-- **`frontend-ci.yml`** — `eslint` → `tsc --noEmit` (type-check) → build, on every push/PR touching `frontend/`.
-- **`terraform-plan.yml`** — runs `terraform plan` on any PR touching `infra/`, so infrastructure changes are reviewed before merge, not after.
-- **`deploy.yml`** — **`workflow_dispatch`-only, not automatic on merge to `main`.** Builds the backend image, pushes it to ECR tagged with the triggering commit's SHA, runs `terraform apply`, syncs the built dashboard to S3, and invalidates the CloudFront cache. Deliberately mirrors the project's human-gated-by-default posture elsewhere — deploying to a real AWS account shouldn't happen silently on every merge.
+- **`backend-ci.yml`** `ruff check` (lint) → `mypy --strict` (type-check) → `pytest` with coverage, on every push/PR touching `backend/`.
+- **`frontend-ci.yml`**  `eslint` → `tsc --noEmit` (type-check) → build, on every push/PR touching `frontend/`.
+- **`terraform-plan.yml`** runs `terraform plan` on any PR touching `infra/`, so infrastructure changes are reviewed before merge, not after.
+- **`deploy.yml`** — **`workflow_dispatch`-only, not automatic on merge to `main`.** Builds the backend image, pushes it to ECR tagged with the triggering commit's SHA, runs `terraform apply`, syncs the built dashboard to S3, and invalidates the CloudFront cache. Deliberately mirrors the project's human-gated-by-default posture elsewhere deploying to a real AWS account shouldn't happen silently on every merge.
 
 All AWS authentication is via **OIDC federation** — two distinct IAM roles, one read-only (used by `terraform-plan.yml`, runs on every PR from any branch) and one broad-write (used only by the manually-triggered `deploy.yml`). No AWS access keys are stored as GitHub secrets anywhere in this repo.
 
@@ -301,11 +301,11 @@ cp .env.example .env.local    # adjust VITE_API_BASE_URL if needed
 npm run dev                   # http://localhost:5173
 ```
 
-The dashboard will show a fetch error until the backend is running — that's expected, not a bug.
+The dashboard will show a fetch error until the backend is running that's expected, not a bug.
 
 ## Docker
 
-The full stack — DynamoDB Local, a one-shot table-creation job, the backend, and the frontend — comes up with one command:
+The full stack  DynamoDB Local, a one-shot table-creation job, the backend, and the frontend comes up with one command:
 
 ```bash
 docker compose up --build
@@ -352,7 +352,7 @@ cloudops-ai/
 │   ├── components/             StatusBadge, EvidenceList, AgentTraceList, ApiKeyControl
 │   └── api/                    typed REST client + API-key storage
 ├── infra/
-│   ├── modules/                 9 modules — see Terraform section above
+│   ├── modules/                 9 modules - see Terraform section above
 │   └── environments/            dev, staging, demo-live
 ├── docs/
 │   └── ARCHITECTURE.md          deep-dive design rationale
@@ -361,7 +361,7 @@ cloudops-ai/
 
 ## Testing & Code Quality
 
-- **99% backend statement coverage** (1,221 statements, 3 missing — both remaining gaps are documented, hard-to-reach defensive branches in `api/dependencies.py` and the boto3 gateway, not neglected code).
+- **99% backend statement coverage** (1,221 statements, 3 missing both remaining gaps are documented, hard-to-reach defensive branches in `api/dependencies.py` and the boto3 gateway, not neglected code).
 - **~169 backend unit tests**, zero real AWS calls — `moto` for AWS API mocking plus hand-written `MagicMock` patching where moto's fidelity has known gaps (e.g., GuardDuty's `ListFindings`), and an in-memory `MockAWSGateway` fixture for agent-level tests.
 - **`ruff` (lint) and `mypy --strict` (type-check)** enforced in CI on every push.
 - **`pytest-asyncio` in strict mode** — every async test is explicitly marked, no implicit event-loop magic.
