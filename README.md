@@ -173,9 +173,9 @@ flowchart TB
 | **Cost** (`cost_agent.py`) | Is this resource idle or oversized? | No |
 | **Infrastructure** (`infrastructure_agent.py`) | What does the resource actually look like right now? | No |
 | **Deployment** (`deployment_agent.py`) | Is this a bad deploy, and is a rollback the right call? | No |
-| **Remediation Executor** (`remediation_executor.py`) | Execute the approved plan and report success or failure | **Yes — the only one** |
+| **Remediation Executor** (`remediation_executor.py`) | Execute the approved plan and report success or failure | **Yes  the only one** |
 
-A deterministic short-circuit in `classify_node` recognizes this project's *own* monitoring alarms (ECS CPU/memory, SQS DLQ depth, poller staleness) by name convention and classifies them as `PLATFORM_HEALTH_ALARM` before any LLM call this exists because `infra/modules/eventbridge`'s alarm rule is intentionally unscoped (it has to catch any CloudWatch alarm, including the platform's own), and asking an LLM to force-fit a platform alarm into a customer-resource incident type (e.g., guessing an ECS CPU alarm is `EC2_HIGH_CPU`) produced a plausible-looking but wrong investigation. See `coordinator.py`'s docstring for the full story — this was a real bug found and fixed during development, not a hypothetical.
+A deterministic short-circuit in `classify_node` recognizes this project's *own* monitoring alarms (ECS CPU/memory, SQS DLQ depth, poller staleness) by name convention and classifies them as `PLATFORM_HEALTH_ALARM` before any LLM call this exists because `infra/modules/eventbridge`'s alarm rule is intentionally unscoped (it has to catch any CloudWatch alarm, including the platform's own), and asking an LLM to force-fit a platform alarm into a customer-resource incident type (e.g., guessing an ECS CPU alarm is `EC2_HIGH_CPU`) produced a plausible-looking but wrong investigation. See `coordinator.py`'s docstring for the full story,this was a real bug found and fixed during development, not a hypothetical.
 
 ## AWS Services Used
 
@@ -186,12 +186,12 @@ A deterministic short-circuit in `classify_node` recognizes this project's *own*
 | **CloudFront** | Terminates TLS for the whole system with its default certificate; dual-origin (S3 for the dashboard, ALB for API paths) so the browser only ever speaks HTTPS. Runs a CloudFront Function for SPA client-side-routing fallback, scoped only to the S3 behavior so it can't rewrite a real API 404 into a 200. |
 | **S3** | Hosts the built React dashboard as a private, OAC-secured origin behind CloudFront. |
 | **DynamoDB** | Single source of truth for incident records (`Incidents` table), accessed through a repository interface with pagination support for `list_all()`. |
-| **EventBridge** | Rule matching CloudWatch alarm state changes (`ALARM`), writing incidents onto the SQS queue — the automated entry point alongside the dashboard's manual "new incident" form. |
+| **EventBridge** | Rule matching CloudWatch alarm state changes (`ALARM`), writing incidents onto the SQS queue - the automated entry point alongside the dashboard's manual "new incident" form. |
 | **SQS** | Decouples alarm ingestion from processing; consumed by an in-process poller inside the backend container, with retry/backoff handling on transient failures. |
-| **CloudWatch** | Alarms and metrics — both the resource being investigated (`get_metric_data` for CPU utilization, etc.) and the platform's own health (ECS CPU/memory, DLQ depth, poller staleness), the latter feeding an SNS topic. |
+| **CloudWatch** | Alarms and metrics - both the resource being investigated (`get_metric_data` for CPU utilization, etc.) and the platform's own health (ECS CPU/memory, DLQ depth, poller staleness), the latter feeding an SNS topic. |
 | **CloudTrail** | Read-only event lookup for the Troubleshooting Agent's root-cause analysis, and the independent, tamper-evident record of what the Remediation Executor's role actually did. |
 | **GuardDuty** | Findings feed into incident triage via the SQS poller and the Security Agent. |
-| **IAM** | Least-privilege roles scoped to the *exact* boto3 calls each tool gateway makes (`MonitoringReadOnlyRole`, `RemediationExecutorRole`), not broad service-level access. OIDC federation for GitHub Actions — no long-lived AWS access keys stored anywhere. |
+| **IAM** | Least-privilege roles scoped to the *exact* boto3 calls each tool gateway makes (`MonitoringReadOnlyRole`, `RemediationExecutorRole`), not broad service-level access. OIDC federation for GitHub Actions no long-lived AWS access keys stored anywhere. |
 | **ECR** | Backend Docker image repository immutable tags, scan-on-push, lifecycle policy for untagged images. |
 | **SNS** | Ops-alert delivery for the platform's own CloudWatch alarms. |
 | **VPC** | Custom networking (not the default VPC) - public subnets for the ALB, private subnets for ECS, one NAT gateway *per Availability Zone* so a private subnet's egress only ever depends on its own AZ's infrastructure. |
@@ -200,12 +200,12 @@ A deterministic short-circuit in `classify_node` recognizes this project's *own*
 
 This is the section a security-focused reviewer should read first.
 
-- **Type-level separation of read and mutate.** `IReadOnlyAWSTools` and `IMutatingAWSTools` are separate Protocols (`tools/interfaces.py`). Six of the eight nodes in the graph are only ever constructed with a read-only tool set — calling a mutating method on them isn't a permissions error, it's a `AttributeError` at the type level, because the method doesn't exist on the object.
+- **Type-level separation of read and mutate.** `IReadOnlyAWSTools` and `IMutatingAWSTools` are separate Protocols (`tools/interfaces.py`). Six of the eight nodes in the graph are only ever constructed with a read-only tool set calling a mutating method on them isn't a permissions error, it's a `AttributeError` at the type level, because the method doesn't exist on the object.
 - **A single, small, heavily-tested mutation gateway.** `remediation_executor.py` is the only place `IMutatingAWSTools` is ever invoked. It's ~50 statements, 100% test-covered, and every action it can take is looked up from a fixed `_ACTION_INVOKERS` mapping - an action name with no entry raises and fails the plan closed rather than doing something undefined.
 - **HMAC-signed approval tokens, not a status flag.** `ApprovalToken.sign()`/`.verify()` (`domain/models/remediation.py`) uses `hmac.compare_digest` (constant-time comparison, avoiding a timing side-channel) and binds the signature to a specific `plan_id`an approval for one plan cannot be replayed against another. A `model_validator` rejects constructing a `RemediationPlan` whose attached approval's `plan_id` doesn't match at all, as a second, independent guard.
 - **Fails closed, everywhere.** `RemediationPlan.can_execute_live()` returns `False` for: a plan that doesn't require approval and isn't in scope for live execution's default; a plan not in `APPROVED` status; a plan with no approval attached at all, even if status somehow reached `APPROVED`; and a plan whose approval fails HMAC verification. Every one of these branches has an explicit test (`tests/unit/domain/test_remediation.py`).
-- **A deterministic, fail-closed action allow-list.** `domain/policies/remediation_policy.py` maps `(incident_type, severity) → allowed_actions`. Any pair not explicitly listed gets no proposed remediation at all — a report-only recommendation, never a guess.
-- **Dry-run by default, everywhere except one named environment.** `CLOUDOPS_REMEDIATION_MODE` is `dry_run` in `environments/dev` and `environments/staging`, and `live` only in `environments/demo-live` — hardcoded per Terraform file, not a shared variable, specifically so it can't be flipped by a mistyped `-var` flag at apply time (see [Terraform / Infrastructure](#terraform--infrastructure)).
+- **A deterministic, fail-closed action allow-list.** `domain/policies/remediation_policy.py` maps `(incident_type, severity) → allowed_actions`. Any pair not explicitly listed gets no proposed remediation at all - a report-only recommendation, never a guess.
+- **Dry-run by default, everywhere except one named environment.** `CLOUDOPS_REMEDIATION_MODE` is `dry_run` in `environments/dev` and `environments/staging`, and `live` only in `environments/demo-live` - hardcoded per Terraform file, not a shared variable, specifically so it can't be flipped by a mistyped `-var` flag at apply time (see [Terraform / Infrastructure](#terraform--infrastructure)).
 - **No long-lived AWS credentials.** GitHub Actions authenticates via OIDC federation to two distinct IAM roles — a read-only plan role usable by any PR, and a broad-write deploy role usable only via a manually-triggered, environment-gated workflow (see [CI/CD](#cicd)).
 - **API-key authentication on every backend route** (`CLOUDOPS_API_KEY`), enforced via a FastAPI dependency with its own dedicated test coverage (`tests/unit/api/test_dependencies.py`, `test_auth.py`).
 
@@ -237,7 +237,7 @@ sequenceDiagram
     end
 ```
 
-Every step appends an `AgentStep` to the incident's `agent_trace` with its own reasoning text — the report isn't a summary generated after the fact, it's the actual sequence of what each agent did and why, reconstructable from DynamoDB alone.
+Every step appends an `AgentStep` to the incident's `agent_trace` with its own reasoning text,the report isn't a summary generated after the fact, it's the actual sequence of what each agent did and why, reconstructable from DynamoDB alone.
 
 ## Terraform / Infrastructure
 
@@ -255,9 +255,9 @@ Nine modules (`infra/modules/`), wired together into three near-identical enviro
 | `alb` | Application Load Balancer, target group, HTTP:80 listener |
 | `frontend` | S3 bucket + CloudFront dual-origin distribution + Origin Access Control + SPA-routing CloudFront Function |
 
-**Why three environments are near-identical file copies, not one parameterized module:** `CLOUDOPS_REMEDIATION_MODE` is hardcoded directly inside each environment's `main.tf` — `dry_run` for `dev`/`staging`, `live` only for `demo-live`. A shared variable could be overridden by anyone's typo or bad copy-paste at apply time (`-var="remediation_mode=live"` against `dev`, say); a value that only exists inside `environments/demo-live/main.tf` cannot leak into another environment without a real, reviewable file diff. The duplication cost (a module change has to be copied into three files by hand) was judged worth it for that guarantee.
+**Why three environments are near-identical file copies, not one parameterized module:** `CLOUDOPS_REMEDIATION_MODE` is hardcoded directly inside each environment's `main.tf`-`dry_run` for `dev`/`staging`, `live` only for `demo-live`. A shared variable could be overridden by anyone's typo or bad copy-paste at apply time (`-var="remediation_mode=live"` against `dev`, say); a value that only exists inside `environments/demo-live/main.tf` cannot leak into another environment without a real, reviewable file diff. The duplication cost (a module change has to be copied into three files by hand) was judged worth it for that guarantee.
 
-Full rationale for every module, IAM permission list, and manual deployment steps live in [`infra/README.md`](./infra/README.md) — including a candid note about which chunk of this project could *not* be verified with a real `terraform plan` (network restrictions in the build sandbox blocked the provider download) and exactly what to run yourself to confirm it.
+Full rationale for every module, IAM permission list, and manual deployment steps live in [`infra/README.md`](./infra/README.md) - including a candid note about which chunk of this project could *not* be verified with a real `terraform plan` (network restrictions in the build sandbox blocked the provider download) and exactly what to run yourself to confirm it.
 
 ## CI/CD
 
@@ -268,7 +268,7 @@ Four GitHub Actions workflows (`.github/workflows/`):
 - **`terraform-plan.yml`** runs `terraform plan` on any PR touching `infra/`, so infrastructure changes are reviewed before merge, not after.
 - **`deploy.yml`** — **`workflow_dispatch`-only, not automatic on merge to `main`.** Builds the backend image, pushes it to ECR tagged with the triggering commit's SHA, runs `terraform apply`, syncs the built dashboard to S3, and invalidates the CloudFront cache. Deliberately mirrors the project's human-gated-by-default posture elsewhere deploying to a real AWS account shouldn't happen silently on every merge.
 
-All AWS authentication is via **OIDC federation** — two distinct IAM roles, one read-only (used by `terraform-plan.yml`, runs on every PR from any branch) and one broad-write (used only by the manually-triggered `deploy.yml`). No AWS access keys are stored as GitHub secrets anywhere in this repo.
+All AWS authentication is via **OIDC federation** - two distinct IAM roles, one read-only (used by `terraform-plan.yml`, runs on every PR from any branch) and one broad-write (used only by the manually-triggered `deploy.yml`). No AWS access keys are stored as GitHub secrets anywhere in this repo.
 
 ## Getting Started
 
@@ -364,7 +364,7 @@ cloudops-ai/
 - **99% backend statement coverage** (1,221 statements, 3 missing both remaining gaps are documented, hard-to-reach defensive branches in `api/dependencies.py` and the boto3 gateway, not neglected code).
 - **~169 backend unit tests**, zero real AWS calls — `moto` for AWS API mocking plus hand-written `MagicMock` patching where moto's fidelity has known gaps (e.g., GuardDuty's `ListFindings`), and an in-memory `MockAWSGateway` fixture for agent-level tests.
 - **`ruff` (lint) and `mypy --strict` (type-check)** enforced in CI on every push.
-- **`pytest-asyncio` in strict mode** — every async test is explicitly marked, no implicit event-loop magic.
+- **`pytest-asyncio` in strict mode** - every async test is explicitly marked, no implicit event-loop magic.
 
 ## Roadmap
 
@@ -390,7 +390,7 @@ See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for local setup, coding standards, an
 
 ## License
 
-[MIT](./LICENSE) — see the LICENSE file for the full text.
+[MIT](./LICENSE) - see the LICENSE file for the full text.
 
 ## Changelog
 
