@@ -2,7 +2,7 @@
 
 # ☁️ CloudOps AI
 
-### An agentic AI cloud engineer that watches AWS, diagnoses incidents, and remediates them — under a human-gated approval workflow
+### An agentic AI cloud engineer that watches AWS, diagnoses incidents, and remediates them under a human-gated approval workflow
 
 *A multi-agent LangGraph system that behaves like a real on-call SRE: it detects, investigates, proposes a fix, waits for a human to approve anything that mutates AWS, executes it, and writes up exactly what happened and why.*
 
