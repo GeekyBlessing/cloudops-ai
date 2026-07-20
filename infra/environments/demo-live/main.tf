@@ -116,9 +116,82 @@ module "monitoring" {
   alert_email      = var.alert_email
   tags             = local.tags
 }
+module "route53" {
+  source      = "../../modules/route53"
+  domain_name = local.domain_name
+  tags        = local.tags
+}
+
+module "acm_certificate" {
+  source = "../../modules/acm_certificate"
+  providers = {
+    aws           = aws
+    aws.us_east_1 = aws.us_east_1
+  }
+  domain_name                = local.domain_name
+  subject_alternative_names  = ["www.${local.domain_name}"]
+  zone_id                    = module.route53.zone_id
+  tags                       = local.tags
+}
+
 module "frontend" {
-  source       = "../../modules/frontend"
-  name_prefix  = local.name_prefix
-  alb_dns_name = module.alb.alb_dns_name
-  tags         = local.tags
+  source              = "../../modules/frontend"
+  name_prefix         = local.name_prefix
+  alb_dns_name        = module.alb.alb_dns_name
+  aliases             = [local.domain_name, "www.${local.domain_name}"]
+  acm_certificate_arn = module.acm_certificate.certificate_arn
+  tags                = local.tags
+}
+
+# CloudFront's alias target hosted zone ID is the same fixed value
+# ("Z2FDTNDATAQYW2") for every CloudFront distribution -- this isn't
+# specific to this project, it's how Route53 alias records address any
+# CloudFront distribution.
+resource "aws_route53_record" "apex" {
+  zone_id = module.route53.zone_id
+  name    = local.domain_name
+  type    = "A"
+  alias {
+    name                   = module.frontend.cloudfront_domain_name
+    zone_id                = "Z2FDTNDATAQYW2"
+    evaluate_target_health = false
+  }
+}
+
+resource "aws_route53_record" "apex_ipv6" {
+  zone_id = module.route53.zone_id
+  name    = local.domain_name
+  type    = "AAAA"
+  alias {
+    name                   = module.frontend.cloudfront_domain_name
+    zone_id                = "Z2FDTNDATAQYW2"
+    evaluate_target_health = false
+  }
+}
+
+resource "aws_route53_record" "www" {
+  zone_id = module.route53.zone_id
+  name    = "www.${local.domain_name}"
+  type    = "A"
+  alias {
+    name                   = module.frontend.cloudfront_domain_name
+    zone_id                = "Z2FDTNDATAQYW2"
+    evaluate_target_health = false
+  }
+}
+
+resource "aws_route53_record" "www_ipv6" {
+  zone_id = module.route53.zone_id
+  name    = "www.${local.domain_name}"
+  type    = "AAAA"
+  alias {
+    name                   = module.frontend.cloudfront_domain_name
+    zone_id                = "Z2FDTNDATAQYW2"
+    evaluate_target_health = false
+  }
+}
+
+
+locals {
+  domain_name = "cloudops-ai.dev"
 }

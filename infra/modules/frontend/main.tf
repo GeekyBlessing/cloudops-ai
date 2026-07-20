@@ -12,17 +12,16 @@
 #
 # Why one distribution with two origins, instead of hosting the dashboard
 # separately and calling the ALB directly from the browser: CloudFront
-# terminates TLS with its own default *.cloudfront.net certificate, but the
-# ALB (infra/modules/alb) only has an HTTP:80 listener -- there's no ACM
-# certificate because there's no custom domain yet (see infra/README.md's
-# "Explicitly deferred" section). If the dashboard called the ALB directly,
-# every API request from the HTTPS-served dashboard to the HTTP-only ALB
-# would be blocked by the browser as mixed content, and the app would load
-# but not function. Routing API paths through CloudFront too means the
-# browser only ever talks to CloudFront over HTTPS; the plaintext HTTP hop
-# is CloudFront-to-ALB, inside AWS's own network, not over the public
-# internet.
-
+# terminates TLS (either with its own default *.cloudfront.net certificate,
+# or with a custom ACM certificate when var.acm_certificate_arn is set),
+# but the ALB (infra/modules/alb) only has an HTTP:80 listener -- there's
+# no ACM certificate directly on the ALB. If the dashboard called the ALB
+# directly, every API request from the HTTPS-served dashboard to the
+# HTTP-only ALB would be blocked by the browser as mixed content, and the
+# app would load but not function. Routing API paths through CloudFront too
+# means the browser only ever talks to CloudFront over HTTPS; the plaintext
+# HTTP hop is CloudFront-to-ALB, inside AWS's own network, not over the
+# public internet.
 data "aws_caller_identity" "current" {}
 
 locals {
@@ -31,15 +30,21 @@ locals {
   # repos, etc. are only unique within an account/region) -- the account ID
   # suffix avoids a collision with some other AWS account that happened to
   # pick the same name_prefix.
-  bucket_name  = "${var.name_prefix}-frontend-${data.aws_caller_identity.current.account_id}"
+  bucket_name   = "${var.name_prefix}-frontend-${data.aws_caller_identity.current.account_id}"
   s3_origin_id  = "${var.name_prefix}-s3"
   alb_origin_id = "${var.name_prefix}-alb"
+
+  # CloudFront requires cloudfront_default_certificate = true when there is
+  # no custom domain, and requires acm_certificate_arn (plus
+  # ssl_support_method) when there is one -- the two are mutually exclusive
+  # within the same viewer_certificate block. var.acm_certificate_arn
+  # defaults to "" for dev/staging, which don't have a custom domain yet.
+  use_custom_domain = var.acm_certificate_arn != ""
 }
 
 # ---------------------------------------------------------------------------
 # S3 bucket: private, CloudFront-only access via OAC
 # ---------------------------------------------------------------------------
-
 resource "aws_s3_bucket" "frontend" {
   bucket = local.bucket_name
   tags   = var.tags
@@ -66,12 +71,10 @@ data "aws_iam_policy_document" "frontend_bucket" {
     effect    = "Allow"
     actions   = ["s3:GetObject"]
     resources = ["${aws_s3_bucket.frontend.arn}/*"]
-
     principals {
       type        = "Service"
       identifiers = ["cloudfront.amazonaws.com"]
     }
-
     condition {
       test     = "StringEquals"
       variable = "AWS:SourceArn"
@@ -88,7 +91,6 @@ resource "aws_s3_bucket_policy" "frontend" {
 # ---------------------------------------------------------------------------
 # CloudFront: Origin Access Control for the S3 origin
 # ---------------------------------------------------------------------------
-
 resource "aws_cloudfront_origin_access_control" "frontend" {
   name                              = "${var.name_prefix}-frontend-oac"
   origin_access_control_origin_type = "s3"
@@ -107,7 +109,6 @@ resource "aws_cloudfront_origin_access_control" "frontend" {
 # turning real API errors into a 200 response containing the SPA shell.
 # A function scoped to one behavior avoids that entirely.
 # ---------------------------------------------------------------------------
-
 resource "aws_cloudfront_function" "spa_fallback" {
   name    = "${var.name_prefix}-spa-fallback"
   runtime = "cloudfront-js-1.0"
@@ -117,11 +118,9 @@ resource "aws_cloudfront_function" "spa_fallback" {
     function handler(event) {
       var request = event.request;
       var uri = request.uri;
-
       if (uri.includes('.')) {
         return request;
       }
-
       request.uri = '/index.html';
       return request;
     }
@@ -131,7 +130,6 @@ resource "aws_cloudfront_function" "spa_fallback" {
 # ---------------------------------------------------------------------------
 # CloudFront managed policies (cache + origin request behavior)
 # ---------------------------------------------------------------------------
-
 data "aws_cloudfront_cache_policy" "caching_optimized" {
   name = "Managed-CachingOptimized"
 }
@@ -147,12 +145,12 @@ data "aws_cloudfront_origin_request_policy" "all_viewer" {
 # ---------------------------------------------------------------------------
 # CloudFront distribution
 # ---------------------------------------------------------------------------
-
 resource "aws_cloudfront_distribution" "this" {
   enabled             = true
   default_root_object = var.default_root_object
   price_class         = var.price_class
   comment             = "${var.name_prefix} dashboard"
+  aliases             = var.aliases
 
   origin {
     domain_name              = aws_s3_bucket.frontend.bucket_regional_domain_name
@@ -163,7 +161,6 @@ resource "aws_cloudfront_distribution" "this" {
   origin {
     domain_name = var.alb_dns_name
     origin_id   = local.alb_origin_id
-
     custom_origin_config {
       http_port              = 80
       https_port              = 443
@@ -178,7 +175,6 @@ resource "aws_cloudfront_distribution" "this" {
     target_origin_id        = local.s3_origin_id
     viewer_protocol_policy  = "redirect-to-https"
     cache_policy_id          = data.aws_cloudfront_cache_policy.caching_optimized.id
-
     function_association {
       event_type   = "viewer-request"
       function_arn = aws_cloudfront_function.spa_fallback.arn
@@ -204,8 +200,13 @@ resource "aws_cloudfront_distribution" "this" {
     }
   }
 
+  # Mutually exclusive fields depending on whether a custom domain is
+  # configured -- see local.use_custom_domain above.
   viewer_certificate {
-    cloudfront_default_certificate = true
+    cloudfront_default_certificate = local.use_custom_domain ? null : true
+    acm_certificate_arn            = local.use_custom_domain ? var.acm_certificate_arn : null
+    ssl_support_method             = local.use_custom_domain ? "sni-only" : null
+    minimum_protocol_version       = local.use_custom_domain ? "TLSv1.2_2021" : null
   }
 
   tags = var.tags

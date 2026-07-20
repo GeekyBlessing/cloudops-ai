@@ -34,6 +34,18 @@ variable "default_root_object" {
   default     = "index.html"
 }
 
+variable "aliases" {
+  description = "Custom domain names (CNAMEs) this distribution should answer to, e.g. [\"cloudops-ai.dev\", \"www.cloudops-ai.dev\"]. Leave as the default empty list for environments with no custom domain (dev, staging) -- CloudFront then falls back to its own *.cloudfront.net certificate and hostname."
+  type        = list(string)
+  default     = []
+}
+
+variable "acm_certificate_arn" {
+  description = "ARN of a validated, us-east-1 ACM certificate (from the acm_certificate module) covering every name in var.aliases. Leave as the default empty string for environments with no custom domain."
+  type        = string
+  default     = ""
+}
+
 variable "tags" {
   description = "Tags applied to all resources created by this module."
   type        = map(string)
