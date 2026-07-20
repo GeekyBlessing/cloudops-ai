@@ -62,6 +62,6 @@ This policy covers:
 Documented here in the same spirit as the rest of this repo's docs — no invented guarantees:
 
 - **API-key auth, not OAuth/JWT.** A single shared key authenticates all requests; there's no per-user identity, and the key isn't scoped or rotatable without a redeploy.
-- **No TLS/custom domain yet.** The CloudFront distribution and ALB are not currently fronted by a custom domain with an ACM certificate — see the [Roadmap](./README.md#roadmap) in the root README.
+- **Custom domain/TLS is `demo-live` only.** `cloudops-ai.dev` (Route53 + a DNS-validated ACM certificate) fronts the `demo-live` CloudFront distribution; `dev` and `staging` still rely on CloudFront's default certificate with no custom domain -- see the [Roadmap](./README.md#roadmap) in the root README.
 - **Single-region.** No cross-region failover or multi-region data residency.
 - **`demo-live` is still a demo.** Its IAM role scope should be reviewed before pointing it at anything beyond disposable AWS resources.

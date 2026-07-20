@@ -368,7 +368,7 @@ cloudops-ai/
 
 ## Roadmap
 
-- [ ] Register a domain, add an ACM certificate, and give the ALB an HTTPS listener (currently HTTP-only behind CloudFront — see [Known Limitations](#known-limitations))
+- [x] ~~Register a domain, add an ACM certificate, and give the ALB an HTTPS listener~~ -- done for `demo-live`: `cloudops-ai.dev`, a Route53 hosted zone, and a DNS-validated ACM certificate now front the CloudFront distribution (see `infra/README.md`). `dev`/`staging` intentionally remain on CloudFront's default certificate.
 - [ ] Extend the remaining incident types' specialist coverage with real integration tests against LocalStack
 - [ ] Add a WebSocket or polling live-activity feed to the dashboard (today the detail page refreshes on demand only)
 - [ ] Incident report generation (the data model supports it; the generation step isn't implemented yet)
@@ -378,7 +378,7 @@ cloudops-ai/
 
 Said plainly, because a senior engineer's documentation says what's missing, not just what's built:
 
-- **No TLS/custom domain yet.** The ALB's listener is HTTP-only; CloudFront (using its default certificate) is what actually gives the dashboard real HTTPS today. See `infra/README.md`'s "TLS/HTTPS and a custom domain" section for the exact plan once a domain is registered.
+- **Custom domain/TLS is `demo-live` only.** `cloudops-ai.dev` is wired up via a Route53 hosted zone and a DNS-validated ACM certificate, but only for `demo-live` -- `dev` and `staging` still get HTTPS from CloudFront's default `*.cloudfront.net` certificate, not a custom domain. See `infra/README.md`'s "Explicitly deferred" section for how this is wired.
 - **API-key auth, not OAuth/JWT.** Fine for a single-operator portfolio system; a multi-user real product would need real identity, not a shared secret header.
 - **No live/streaming updates.** The dashboard fetches on load and on explicit user action — no WebSocket push yet.
 - **`IncidentReport` generation isn't implemented.** The model exists (`domain/models/report.py`); nothing populates it yet.

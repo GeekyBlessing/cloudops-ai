@@ -43,19 +43,35 @@ correct, so this was built incrementally across several chunks:
   only thing left with direct internet exposure, and it gives the backend
   a stable DNS name (the `alb_dns_name` output) that no longer changes on
   every redeploy the way the task's old public IP did.
+- **`modules/route53`** -- a public Route53 hosted zone for the project's
+  custom domain (`cloudops-ai.dev`). Only instantiated in
+  `environments/demo-live` -- `dev` and `staging` have no custom domain and
+  don't need one.
+- **`modules/acm_certificate`** -- requests a DNS-validated ACM certificate
+  in `us-east-1` (the only region CloudFront accepts certificates from,
+  regardless of `var.aws_region`) and validates it via records created in
+  the `route53` module's zone. Also `demo-live`-only.
 - **`environments/dev`** -- wires all eight modules together into one
-  deployable stack.
+  deployable stack. `environments/demo-live` wires in two more
+  (`route53`, `acm_certificate`) for its custom domain -- see "Explicitly
+  deferred" below.
 
 ### Explicitly deferred (not silently skipped)
 
-- **TLS/HTTPS and a custom domain.** `modules/alb`'s listener is HTTP-only
-  on port 80 -- there is no ACM certificate and no Route53 hosted zone,
-  because there's no domain name for this project to get one for. The ALB
-  gives a stable DNS name, not encryption in transit. Adding TLS later
-  means buying/registering a domain, creating a Route53 zone, requesting
-  an ACM cert with DNS validation, and adding an HTTPS listener (with the
-  HTTP one either removed or redirecting to it) -- a real chunk of its
-  own, not a config flag.
+- ~~TLS/HTTPS and a custom domain~~ -- **built, for `demo-live` only**.
+  `cloudops-ai.dev` now has a Route53 hosted zone (`modules/route53`) and a
+  DNS-validated ACM certificate (`modules/acm_certificate`, requested in
+  `us-east-1`) attached to `modules/frontend`'s CloudFront distribution via
+  its new `aliases` and `acm_certificate_arn` variables. `modules/alb`
+  itself is still HTTP-only -- CloudFront terminates TLS, same as before,
+  just now with a real certificate for a real domain instead of
+  CloudFront's default one. One manual step Terraform cannot do: after
+  `apply`, the domain's nameservers have to be set to the four values in
+  `terraform output` on the `route53` module, at the registrar -- otherwise
+  the hosted zone is just an orphaned AWS resource with nothing pointing at
+  it. `dev` and `staging` are unaffected: `modules/frontend`'s `aliases`
+  and `acm_certificate_arn` both default to empty, so those environments
+  keep using CloudFront's default certificate with no custom domain.
 - ~~Single NAT gateway, not one per AZ~~ -- **fixed**. `modules/networking`
   now creates one NAT gateway and one private route table per AZ, so a
   private subnet only ever depends on infrastructure in its own AZ --
@@ -276,9 +292,18 @@ needed (none of this is automatable from within the workflow file itself
    `cloudfront:UpdateFunction`/`cloudfront:PublishFunction`/
    `cloudfront:GetFunction`/`cloudfront:DescribeFunction`/
    `cloudfront:DeleteFunction` (the distribution, OAC, and SPA-fallback
-   function). This is a deliberate, reviewed grant appropriate for a role
-   that only a human-triggered, environment-gated workflow can assume --
-   not a rubber stamp.
+   function), and, now that `modules/route53`/`modules/acm_certificate`
+   exist (`demo-live`-only), `route53:CreateHostedZone`/
+   `route53:GetHostedZone`/`route53:DeleteHostedZone`/
+   `route53:ChangeResourceRecordSets`/`route53:ListResourceRecordSets`/
+   `route53:GetChange`/`route53:ChangeTagsForResource`/
+   `route53:ListTagsForResource` (the hosted zone and its records), plus,
+   in `us-east-1` specifically, `acm:RequestCertificate`/
+   `acm:DescribeCertificate`/`acm:GetCertificate`/`acm:DeleteCertificate`/
+   `acm:AddTagsToCertificate`/`acm:ListTagsForCertificate` (the ACM
+   certificate). This is a deliberate, reviewed grant appropriate for a
+   role that only a human-triggered, environment-gated workflow can
+   assume -- not a rubber stamp.
 4. **Two more permissions the deploy job itself calls directly, outside
    `terraform apply`** -- syncing the built dashboard into the frontend
    bucket and busting the CloudFront cache so the new build is actually
