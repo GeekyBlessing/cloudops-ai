@@ -233,7 +233,7 @@ sequenceDiagram
         AWS-->>Executor: success
         Executor->>Graph: status = VERIFIED
     else invalid / missing / forged approval
-        Executor->>Graph: refuse — no AWS call made
+        Executor->>Graph: refuse no AWS call made
     end
 ```
 
